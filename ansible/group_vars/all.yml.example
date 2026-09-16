@@ -1,0 +1,63 @@
+---
+# Kopieren nach `group_vars/all.yml` und anpassen.
+#
+# WICHTIG - Secrets:
+#   Alles unter "Secrets" gehört in eine Vault-Datei, NICHT im Klartext ins Repo:
+#     ansible-vault create group_vars/all/vault.yml
+#     ansible-playbook -i inventory.ini deploy.yml --ask-vault-pass
+#   `group_vars/all.yml` ist bereits gitignored - das ersetzt aber kein Vault.
+
+# ------------------------------ Allgemein ------------------------------------
+app_port: 3000
+app_timezone: Europe/Berlin
+log_level: info
+# true, wenn nginx/Traefik davor hängt
+trust_proxy: false
+
+# ------------------------------- Secrets -------------------------------------
+auth_user: admin
+# Mindestens 12 Zeichen - das Playbook bricht sonst ab.
+# Erzeugen mit: openssl rand -base64 24
+auth_password: "BITTE-ERSETZEN-openssl-rand-base64-24"
+
+smtp_host: smtp.example.com
+smtp_port: 587
+smtp_secure: false
+smtp_user: wallbox@example.com
+smtp_password: "BITTE-ERSETZEN"
+
+# ------------------------------- Wallbox -------------------------------------
+mennekes_base_url: "http://192.168.1.50"
+# none | basic | bearer | apikey
+mennekes_auth_mode: none
+mennekes_username: ""
+mennekes_password: ""
+mennekes_token: ""
+
+# Die Endpunkt-Pfade unterscheiden sich je nach Firmware. Vorher prüfen mit:
+#   curl -s http://192.168.1.50/api/v1/status | jq
+mennekes_endpoint_status: "/api/v1/status"
+mennekes_endpoint_sessions: "/api/v1/transactions"
+mennekes_endpoint_meter: ""
+
+# -------------------------------- E-Mail -------------------------------------
+mail_from: "wallbox@example.com"
+mail_to:
+  - "buchhaltung@arbeitgeber.de"
+mail_cc: []
+mail_subject_prefix: "Ladestrom-Abrechnung"
+
+# ------------------------------ Abrechnung -----------------------------------
+price_per_kwh: 0.30
+currency: EUR
+locale: de-DE
+company_name: "Arbeitgeber GmbH"
+employee_name: "Max Mustermann"
+vehicle_plate: "M-EV 1234"
+logo_url: ""
+
+# ---------------------------- Automatisierung --------------------------------
+cron_enabled: true
+# Täglich 23:30; der Job prüft selbst, ob heute der Monatsletzte ist.
+cron_expression: "30 23 * * *"
+cron_run_policy: last-day-of-month

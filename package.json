@@ -1,0 +1,66 @@
+{
+  "name": "mennekes-wallbox-billing",
+  "version": "1.0.0",
+  "description": "Monatliche Ladestrom-Abrechnung (PDF + CSV) und Live-Dashboard für MENNEKES Wallboxen",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage --runInBand",
+    "lint": "eslint src tests",
+    "report:run": "node scripts/run-report.js"
+  },
+  "keywords": [
+    "mennekes",
+    "wallbox",
+    "ev",
+    "charging",
+    "billing",
+    "invoice",
+    "dashboard"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@json2csv/plainjs": "^7.0.6",
+    "axios": "^1.7.7",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.21.1",
+    "express-basic-auth": "^1.2.1",
+    "express-rate-limit": "^7.4.1",
+    "handlebars": "^4.7.8",
+    "helmet": "^8.0.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16",
+    "puppeteer": "^23.6.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.13.0",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js"
+    ],
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "src/server.js"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/fixtures/"
+    ],
+    "setupFiles": [
+      "<rootDir>/tests/setup.js"
+    ]
+  }
+}

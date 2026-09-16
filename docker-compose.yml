@@ -1,0 +1,63 @@
+# =============================================================================
+#  Mennekes Wallbox Billing - Container-Setup
+#
+#  Lokal:            docker compose up -d --build
+#  Via Ansible:      wird nach /opt/mennekes-billing kopiert und dort gestartet
+# =============================================================================
+
+services:
+  wallbox-billing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mennekes-wallbox-billing:latest
+    container_name: mennekes-wallbox-billing
+    restart: unless-stopped
+
+    # Alle Secrets kommen aus der .env - nichts davon steht in dieser Datei.
+    env_file:
+      - .env
+
+    ports:
+      # Nur an localhost binden, wenn ein Reverse-Proxy davor sitzt:
+      #   "127.0.0.1:3000:3000"
+      - "${PORT:-3000}:3000"
+
+    volumes:
+      # Persistenz für settings.json und die erzeugten PDFs/CSVs.
+      - wallbox-data:/app/data
+      # Zeitzone des Hosts übernehmen (schadet nicht, TZ ist zusätzlich gesetzt).
+      - /etc/localtime:/etc/localtime:ro
+
+    # ---------------------------------------------------- Härtung ------------
+    security_opt:
+      # Chromium braucht in diesem Setup den Standard-seccomp-Profilsatz nicht
+      # zu verlassen; --no-sandbox ist gesetzt (siehe PUPPETEER_NO_SANDBOX).
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: false   # settings.json und Reports werden zur Laufzeit geschrieben
+
+    # Chromium nutzt /dev/shm; der Docker-Default von 64 MB reicht dafür nicht
+    # zuverlässig. Alternativ ist --disable-dev-shm-usage gesetzt (siehe pdfService).
+    shm_size: 256mb
+
+    # PID 1 ist tini (siehe Dockerfile) - Chromium-Zombies werden eingesammelt.
+    init: false
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const a=Buffer.from((process.env.AUTH_USER||'admin')+':'+(process.env.AUTH_PASSWORD||'')).toString('base64');http.get({host:'127.0.0.1',port:3000,path:'/api/health',headers:{Authorization:'Basic '+a}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  wallbox-data:
+    driver: local

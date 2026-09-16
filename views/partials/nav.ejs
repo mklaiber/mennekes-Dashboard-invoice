@@ -1,0 +1,22 @@
+<header class="border-b border-white/10 bg-slate-900/60 backdrop-blur sticky top-0 z-20">
+  <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/15 text-lg" aria-hidden="true">⚡</div>
+      <div class="min-w-0">
+        <div class="truncate text-sm font-semibold"><%= settings.wallbox.displayName %></div>
+        <div class="truncate text-xs text-slate-400">Ladestrom-Abrechnung</div>
+      </div>
+    </div>
+
+    <nav class="flex items-center gap-1 text-sm" aria-label="Hauptnavigation">
+      <a href="/"
+         class="rounded-lg px-3 py-1.5 transition <%= active === 'dashboard' ? 'bg-white/10 font-semibold text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white' %>"
+         <%= active === 'dashboard' ? 'aria-current="page"' : '' %>>Dashboard</a>
+      <a href="/einstellungen"
+         class="rounded-lg px-3 py-1.5 transition <%= active === 'settings' ? 'bg-white/10 font-semibold text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white' %>"
+         <%= active === 'settings' ? 'aria-current="page"' : '' %>>Einstellungen</a>
+    </nav>
+
+  </div>
+</header>

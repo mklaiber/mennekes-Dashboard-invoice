@@ -1,0 +1,266 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight">Einstellungen</h1>
+    <p class="mt-0.5 text-sm text-slate-400">
+      Nicht sensible Konfiguration. Zugangsdaten (SMTP-Passwort, Wallbox-Token) kommen ausschließlich aus der
+      <code class="rounded bg-white/10 px-1 py-0.5 text-xs">.env</code> und sind hier bewusst nicht änderbar.
+    </p>
+  </div>
+
+  <!-- Statusmeldung nach dem Speichern -->
+  <div id="toast" class="mb-5 hidden rounded-xl border px-4 py-3 text-sm" role="status" aria-live="polite"></div>
+
+  <form id="settings-form" class="space-y-6">
+
+    <!-- ===================== Wallbox ===================== -->
+    <section class="rounded-2xl border border-white/10 bg-slate-900 p-5">
+      <h2 class="text-base font-semibold">Wallbox</h2>
+      <p class="mt-0.5 text-xs text-slate-400">Adresse der REST-API und Anzeigename im Dashboard.</p>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="wallbox-baseUrl" class="block text-sm font-medium text-slate-300">Basis-URL / Hostname</label>
+          <input id="wallbox-baseUrl" name="wallbox.baseUrl" type="url" required
+                 value="<%= settings.wallbox.baseUrl %>" placeholder="http://192.168.1.50"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+          <p class="mt-1 text-xs text-slate-500">Auth-Modus: <code class="text-slate-400"><%= envInfo.wallboxAuthMode %></code> (via ENV)</p>
+        </div>
+        <div>
+          <label for="wallbox-displayName" class="block text-sm font-medium text-slate-300">Anzeigename</label>
+          <input id="wallbox-displayName" name="wallbox.displayName" type="text"
+                 value="<%= settings.wallbox.displayName %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== Abrechnung ===================== -->
+    <section class="rounded-2xl border border-white/10 bg-slate-900 p-5">
+      <h2 class="text-base font-semibold">Abrechnung</h2>
+      <p class="mt-0.5 text-xs text-slate-400">Fließt direkt in PDF, CSV und die Dashboard-Vorschau ein.</p>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-3">
+        <div>
+          <label for="billing-pricePerKwh" class="block text-sm font-medium text-slate-300">Strompreis (pro kWh)</label>
+          <input id="billing-pricePerKwh" name="billing.pricePerKwh" type="number" step="0.0001" min="0" max="10" required
+                 value="<%= settings.billing.pricePerKwh %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm tabular-nums focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label for="billing-currency" class="block text-sm font-medium text-slate-300">Währung</label>
+          <input id="billing-currency" name="billing.currency" type="text" maxlength="3"
+                 value="<%= settings.billing.currency %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm uppercase focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label for="billing-timezone" class="block text-sm font-medium text-slate-300">Zeitzone</label>
+          <input id="billing-timezone" name="billing.timezone" type="text"
+                 value="<%= settings.billing.timezone %>" placeholder="Europe/Berlin"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-3">
+        <div>
+          <label for="billing-employeeName" class="block text-sm font-medium text-slate-300">Mitarbeiter</label>
+          <input id="billing-employeeName" name="billing.employeeName" type="text"
+                 value="<%= settings.billing.employeeName %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label for="billing-companyName" class="block text-sm font-medium text-slate-300">Arbeitgeber</label>
+          <input id="billing-companyName" name="billing.companyName" type="text"
+                 value="<%= settings.billing.companyName %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label for="billing-vehiclePlate" class="block text-sm font-medium text-slate-300">Kennzeichen</label>
+          <input id="billing-vehiclePlate" name="billing.vehiclePlate" type="text"
+                 value="<%= settings.billing.vehiclePlate %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <label for="billing-logoUrl" class="block text-sm font-medium text-slate-300">Logo-URL (optional)</label>
+        <input id="billing-logoUrl" name="billing.logoUrl" type="text"
+               value="<%= settings.billing.logoUrl %>" placeholder="https://… oder data:image/png;base64,…"
+               class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        <p class="mt-1 text-xs text-slate-500">Wird im Kopf des PDFs angezeigt. Ohne Angabe erscheint ein dezenter Platzhalter.</p>
+      </div>
+    </section>
+
+    <!-- ===================== E-Mail ===================== -->
+    <section class="rounded-2xl border border-white/10 bg-slate-900 p-5">
+      <h2 class="text-base font-semibold">E-Mail-Versand</h2>
+      <p class="mt-0.5 text-xs text-slate-400">
+        SMTP-Server: <code class="text-slate-400"><%= envInfo.smtpHost %>:<%= envInfo.smtpPort %></code>
+        <%= envInfo.smtpAuth ? '(authentifiziert)' : '(ohne Authentifizierung)' %> – konfiguriert über die ENV.
+      </p>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="mail-from" class="block text-sm font-medium text-slate-300">Absender</label>
+          <input id="mail-from" name="mail.from" type="email" value="<%= settings.mail.from %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label for="mail-subjectPrefix" class="block text-sm font-medium text-slate-300">Betreff-Präfix</label>
+          <input id="mail-subjectPrefix" name="mail.subjectPrefix" type="text" value="<%= settings.mail.subjectPrefix %>"
+                 class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label for="mail-to" class="block text-sm font-medium text-slate-300">Empfänger</label>
+          <textarea id="mail-to" name="mail.to" rows="2" placeholder="buchhaltung@firma.de, chef@firma.de"
+                    class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"><%= settings.mail.to.join(', ') %></textarea>
+          <p class="mt-1 text-xs text-slate-500">Mehrere Adressen mit Komma trennen.</p>
+        </div>
+        <div>
+          <label for="mail-cc" class="block text-sm font-medium text-slate-300">Kopie (CC)</label>
+          <textarea id="mail-cc" name="mail.cc" rows="2"
+                    class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"><%= settings.mail.cc.join(', ') %></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== RFID-Mapping ===================== -->
+    <section class="rounded-2xl border border-white/10 bg-slate-900 p-5">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-base font-semibold">RFID-Zuordnung</h2>
+          <p class="mt-0.5 text-xs text-slate-400">Ordnet Karten-IDs einem Namen zu. Nicht zugeordnete Karten erscheinen im PDF als „unbekannt“.</p>
+        </div>
+        <button type="button" id="add-rfid"
+                class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium hover:bg-white/10">
+          + Karte hinzufügen
+        </button>
+      </div>
+
+      <div class="mt-4 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase tracking-wider text-slate-400">
+            <tr>
+              <th scope="col" class="pb-2 text-left font-semibold">RFID-ID</th>
+              <th scope="col" class="pb-2 text-left font-semibold">Name</th>
+              <th scope="col" class="pb-2 text-left font-semibold">Kennzeichen</th>
+              <th scope="col" class="pb-2 text-center font-semibold">Abrechenbar</th>
+              <th scope="col" class="pb-2"><span class="sr-only">Aktion</span></th>
+            </tr>
+          </thead>
+          <tbody id="rfid-rows" class="align-top"></tbody>
+        </table>
+      </div>
+      <p id="rfid-empty" class="mt-3 hidden text-sm text-slate-500">Noch keine Zuordnung angelegt.</p>
+    </section>
+
+    <!-- ===================== Automatisierung ===================== -->
+    <section class="rounded-2xl border border-white/10 bg-slate-900 p-5">
+      <h2 class="text-base font-semibold">Automatisierung</h2>
+      <p class="mt-0.5 text-xs text-slate-400">
+        Cron-Zeitplan: <code class="text-slate-400"><%= envInfo.cronExpression %></code> (via ENV,
+        <%= envInfo.cronEnabled ? 'aktiv' : 'deaktiviert' %>)
+      </p>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <label class="flex items-center gap-3 rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5">
+          <input id="scheduler-enabled" name="scheduler.enabled" type="checkbox" <%= settings.scheduler.enabled ? 'checked' : '' %>
+                 class="h-4 w-4 rounded border-white/20 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+          <span class="text-sm">Automatischen Monatsversand aktivieren</span>
+        </label>
+        <div>
+          <label for="scheduler-runPolicy" class="block text-sm font-medium text-slate-300">Ausführung</label>
+          <select id="scheduler-runPolicy" name="scheduler.runPolicy"
+                  class="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+            <option value="last-day-of-month" <%= settings.scheduler.runPolicy === 'last-day-of-month' ? 'selected' : '' %>>Nur am Monatsletzten</option>
+            <option value="always" <%= settings.scheduler.runPolicy === 'always' ? 'selected' : '' %>>Bei jedem Cron-Lauf (Test)</option>
+          </select>
+        </div>
+      </div>
+      <p class="mt-3 text-xs text-slate-500">
+        Änderungen an Zeitplan und Aktivierung greifen nach einem Neustart des Containers.
+      </p>
+    </section>
+
+    <div class="flex items-center gap-3">
+      <button type="submit" id="save-button"
+              class="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50">
+        Einstellungen speichern
+      </button>
+      <span id="save-hint" class="text-xs text-slate-500"></span>
+    </div>
+  </form>
+
+  <!-- ===================== Manueller Lauf ===================== -->
+  <section class="mt-8 rounded-2xl border border-white/10 bg-slate-900 p-5">
+    <h2 class="text-base font-semibold">Abrechnung manuell erzeugen</h2>
+    <p class="mt-0.5 text-xs text-slate-400">Erzeugt PDF und CSV für den gewählten Monat – optional mit sofortigem E-Mail-Versand.</p>
+
+    <div class="mt-4 flex flex-wrap items-end gap-3">
+      <div>
+        <label for="run-month" class="block text-sm font-medium text-slate-300">Monat</label>
+        <select id="run-month" class="mt-1.5 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+          <% months.forEach(function (month) { %>
+            <option value="<%= month.value %>" <%= month.value === defaultMonth ? 'selected' : '' %>><%= month.name %></option>
+          <% }); %>
+        </select>
+      </div>
+      <div>
+        <label for="run-year" class="block text-sm font-medium text-slate-300">Jahr</label>
+        <select id="run-year" class="mt-1.5 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+          <% years.forEach(function (year) { %>
+            <option value="<%= year %>" <%= year === defaultYear ? 'selected' : '' %>><%= year %></option>
+          <% }); %>
+        </select>
+      </div>
+      <label class="flex items-center gap-2 pb-2 text-sm">
+        <input id="run-sendmail" type="checkbox" class="h-4 w-4 rounded border-white/20 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+        E-Mail versenden
+      </label>
+      <button type="button" id="run-button"
+              class="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50">
+        Jetzt erzeugen
+      </button>
+    </div>
+
+    <div id="run-result" class="mt-4 hidden rounded-xl border px-4 py-3 text-sm"></div>
+  </section>
+
+  <!-- ===================== Erzeugte Dateien ===================== -->
+  <section class="mt-8 rounded-2xl border border-white/10 bg-slate-900 p-5">
+    <h2 class="text-base font-semibold">Erzeugte Dateien</h2>
+    <p class="mt-0.5 text-xs text-slate-400">Ablage: <code class="text-slate-400"><%= envInfo.outputDir %></code></p>
+
+    <div class="mt-4">
+      <% if (files.length === 0) { %>
+        <p class="text-sm text-slate-500">Noch keine Dateien erzeugt.</p>
+      <% } else { %>
+        <ul class="divide-y divide-white/5 text-sm">
+          <% files.forEach(function (file) { %>
+            <li class="flex items-center justify-between gap-4 py-2.5">
+              <div class="min-w-0">
+                <a class="truncate font-medium text-emerald-300 hover:underline"
+                   href="/api/report/files/<%= encodeURIComponent(file.fileName) %>"><%= file.fileName %></a>
+                <div class="text-xs text-slate-500">
+                  <%= new Date(file.modifiedAt).toLocaleString(settings.billing.locale) %>
+                </div>
+              </div>
+              <span class="shrink-0 tabular-nums text-xs text-slate-500"><%= Math.round(file.sizeBytes / 1024) %> KB</span>
+            </li>
+          <% }); %>
+        </ul>
+      <% } %>
+    </div>
+  </section>
+
+</main>
+
+<script id="bootstrap-settings" type="application/json" nonce="<%= cspNonce %>">
+  <%- JSON.stringify({ rfidMappings: settings.rfidMappings }) %>
+</script>
+<script src="/static/js/settings.js" nonce="<%= cspNonce %>"></script>
+
+<%- include('partials/foot') %>

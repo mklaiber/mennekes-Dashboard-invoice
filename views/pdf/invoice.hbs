@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Ladestrom-Abrechnung {{report.period.label}}</title>
+<style>
+  /* ============================================================
+     Druck-Layout A4. Bewusst ohne externe Fonts/CDN:
+     Puppeteer rendert offline im Container - ein nicht ladbarer
+     Webfont würde das Layout unvorhersehbar verschieben.
+     ============================================================ */
+  @page {
+    size: A4;
+    margin: 14mm 13mm 18mm 13mm;
+  }
+
+  :root {
+    --ink:      #111827;
+    --ink-soft: #4b5563;
+    --muted:    #9ca3af;
+    --line:     #e5e7eb;
+    --line-2:   #f3f4f6;
+    --accent:   #0f766e;
+    --accent-l: #ecfdf5;
+    --warn:     #b45309;
+    --warn-bg:  #fffbeb;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.45;
+    color: var(--ink);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ---------- Kopfbereich ---------- */
+  .masthead {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16mm;
+    padding-bottom: 5mm;
+    border-bottom: 2.5pt solid var(--accent);
+  }
+
+  .brand { display: flex; align-items: center; gap: 4mm; }
+
+  .logo {
+    width: 26mm;
+    height: 26mm;
+    object-fit: contain;
+  }
+
+  /* Fallback, wenn kein Logo konfiguriert ist: dezente Wortmarke statt leerer Kasten. */
+  .logo-fallback {
+    width: 26mm;
+    height: 26mm;
+    border: 1.2pt dashed var(--line);
+    border-radius: 3mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--muted);
+    font-size: 7pt;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+
+  .brand-text .issuer { font-size: 13pt; font-weight: 700; letter-spacing: -.01em; }
+  .brand-text .sub    { font-size: 8.5pt; color: var(--ink-soft); margin-top: .8mm; }
+
+  .doc-meta { text-align: right; }
+  .doc-title {
+    font-size: 16pt;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    line-height: 1.15;
+  }
+  .doc-period {
+    display: inline-block;
+    margin-top: 1.5mm;
+    padding: 1mm 2.5mm;
+    background: var(--accent-l);
+    color: var(--accent);
+    border-radius: 1.5mm;
+    font-size: 9pt;
+    font-weight: 600;
+  }
+  .doc-ref { margin-top: 2mm; font-size: 8pt; color: var(--muted); }
+
+  /* ---------- Stammdaten ---------- */
+  .parties {
+    display: flex;
+    gap: 8mm;
+    margin-top: 6mm;
+  }
+  .party {
+    flex: 1;
+    border: .8pt solid var(--line);
+    border-radius: 2mm;
+    padding: 3.5mm 4mm;
+  }
+  .party h3 {
+    margin: 0 0 1.5mm;
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .party dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: .8mm 3mm; }
+  .party dt { color: var(--ink-soft); }
+  .party dd { margin: 0; font-weight: 600; text-align: right; }
+
+  /* ---------- Kennzahlen ---------- */
+  .kpis {
+    display: flex;
+    gap: 3mm;
+    margin-top: 6mm;
+  }
+  .kpi {
+    flex: 1;
+    border: .8pt solid var(--line);
+    border-radius: 2mm;
+    padding: 3.5mm 4mm;
+  }
+  .kpi.is-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .kpi .label {
+    font-size: 7pt;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .kpi.is-primary .label { color: rgba(255,255,255,.82); }
+  .kpi .value {
+    margin-top: 1.2mm;
+    font-size: 15pt;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi .unit { font-size: 9pt; font-weight: 600; margin-left: .6mm; }
+  .kpi .hint { margin-top: .8mm; font-size: 7.5pt; color: var(--ink-soft); }
+  .kpi.is-primary .hint { color: rgba(255,255,255,.8); }
+
+  /* ---------- Abschnitte ---------- */
+  section { margin-top: 7mm; }
+  h2 {
+    margin: 0 0 2.5mm;
+    font-size: 10pt;
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+  h2 .count { color: var(--muted); font-weight: 500; }
+
+  /* ---------- Tabellen ---------- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  thead { display: table-header-group; }  /* Kopfzeile auf jeder Folgeseite wiederholen */
+  tr    { page-break-inside: avoid; }
+
+  th {
+    text-align: left;
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0 2.2mm 1.6mm;
+    border-bottom: 1pt solid var(--line);
+    white-space: nowrap;
+  }
+  td {
+    padding: 1.7mm 2.2mm;
+    border-bottom: .5pt solid var(--line-2);
+    vertical-align: top;
+  }
+  tbody tr:nth-child(even) td { background: #fafafa; }
+  .num { text-align: right; white-space: nowrap; }
+  .strong { font-weight: 700; }
+
+  .name-cell .plate {
+    display: block;
+    font-size: 7.5pt;
+    color: var(--muted);
+    margin-top: .3mm;
+  }
+  .rfid {
+    font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 7.5pt;
+    color: var(--ink-soft);
+  }
+
+  tfoot td {
+    border-top: 1.2pt solid var(--ink);
+    border-bottom: none;
+    padding-top: 2.2mm;
+    font-weight: 700;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: .2mm 1.5mm;
+    border-radius: 1mm;
+    font-size: 7pt;
+    font-weight: 700;
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+
+  /* ---------- Schlussrechnung ---------- */
+  .settlement {
+    margin-top: 6mm;
+    margin-left: auto;
+    width: 82mm;
+    border: .8pt solid var(--line);
+    border-radius: 2mm;
+    overflow: hidden;
+  }
+  .settlement .line {
+    display: flex;
+    justify-content: space-between;
+    padding: 2mm 4mm;
+    border-bottom: .5pt solid var(--line-2);
+  }
+  .settlement .line span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .settlement .total {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 3mm 4mm;
+    background: var(--accent);
+    color: #fff;
+    border-bottom: none;
+  }
+  .settlement .total .label { font-size: 8.5pt; font-weight: 600; letter-spacing: .02em; }
+  .settlement .total .amount { font-size: 14pt; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .notice {
+    margin-top: 5mm;
+    padding: 2.5mm 3.5mm;
+    background: var(--warn-bg);
+    border-left: 2pt solid var(--warn);
+    border-radius: 0 1.5mm 1.5mm 0;
+    font-size: 8pt;
+    color: var(--warn);
+  }
+
+  .empty {
+    padding: 12mm;
+    text-align: center;
+    color: var(--muted);
+    border: 1pt dashed var(--line);
+    border-radius: 2mm;
+  }
+
+  .footnote {
+    margin-top: 8mm;
+    padding-top: 3mm;
+    border-top: .8pt solid var(--line);
+    font-size: 7.5pt;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+
+  <header class="masthead">
+    <div class="brand">
+      {{#if settings.billing.logoUrl}}
+        <img class="logo" src="{{settings.billing.logoUrl}}" alt="Logo">
+      {{else}}
+        <div class="logo-fallback">Logo</div>
+      {{/if}}
+      <div class="brand-text">
+        <div class="issuer">{{#if settings.billing.employeeName}}{{settings.billing.employeeName}}{{else}}Ladestrom-Abrechnung{{/if}}</div>
+        <div class="sub">{{settings.wallbox.displayName}}</div>
+      </div>
+    </div>
+
+    <div class="doc-meta">
+      <div class="doc-title">Ladestrom-<br>Abrechnung</div>
+      <div class="doc-period">{{report.period.label}}</div>
+      <div class="doc-ref">Beleg-Nr. {{documentNumber}} &middot; erstellt am {{generatedAtLabel}}</div>
+    </div>
+  </header>
+
+  <div class="parties">
+    <div class="party">
+      <h3>Abrechnungszeitraum</h3>
+      <dl>
+        <dt>Von</dt><dd>{{report.period.startLabel}}</dd>
+        <dt>Bis</dt><dd>{{report.period.endLabel}}</dd>
+        <dt>Ladevorgänge</dt><dd>{{report.totals.sessionCount}}</dd>
+        <dt>Ladekarten</dt><dd>{{report.totals.rfidCount}}</dd>
+      </dl>
+    </div>
+    <div class="party">
+      <h3>Stammdaten</h3>
+      <dl>
+        {{#if settings.billing.employeeName}}<dt>Mitarbeiter</dt><dd>{{settings.billing.employeeName}}</dd>{{/if}}
+        {{#if settings.billing.companyName}}<dt>Arbeitgeber</dt><dd>{{settings.billing.companyName}}</dd>{{/if}}
+        {{#if settings.billing.vehiclePlate}}<dt>Kennzeichen</dt><dd>{{settings.billing.vehiclePlate}}</dd>{{/if}}
+        <dt>Arbeitspreis</dt><dd>{{money report.pricePerKwh 4}} / kWh</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi is-primary">
+      <div class="label">Geladene Energie</div>
+      <div class="value">{{num report.totals.energyKwh 2}}<span class="unit">kWh</span></div>
+      <div class="hint">Ø {{num report.totals.averageKwhPerSession 2}} kWh je Ladevorgang</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Ladezeit gesamt</div>
+      <div class="value">{{report.totals.duration}}</div>
+      <div class="hint">{{report.totals.sessionCount}} abgeschlossene Vorgänge</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Erstattungsbetrag</div>
+      <div class="value">{{money report.totals.billableCost}}</div>
+      <div class="hint">{{num report.totals.billableEnergyKwh 2}} kWh abrechenbar</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Zusammenfassung je Ladekarte <span class="count">({{report.totals.rfidCount}})</span></h2>
+    {{#if report.groups.length}}
+      <table>
+        <thead>
+          <tr>
+            <th>Ladekarte / Nutzer</th>
+            <th>RFID</th>
+            <th class="num">Vorgänge</th>
+            <th class="num">Ladezeit</th>
+            <th class="num">Energie</th>
+            <th class="num">Betrag</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{#each report.groups}}
+            <tr>
+              <td class="name-cell">
+                <span class="strong">{{this.name}}</span>
+                {{#unless this.knownRfid}} <span class="badge">nicht zugeordnet</span>{{/unless}}
+                {{#if this.plate}}<span class="plate">{{this.plate}}</span>{{/if}}
+              </td>
+              <td class="rfid">{{#if this.rfidRaw}}{{this.rfidRaw}}{{else}}{{this.rfid}}{{/if}}</td>
+              <td class="num">{{this.sessionCount}}</td>
+              <td class="num">{{this.duration}}</td>
+              <td class="num">{{num this.energyKwh 2}} kWh</td>
+              <td class="num strong">{{money this.cost}}</td>
+            </tr>
+          {{/each}}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2">Gesamt</td>
+            <td class="num">{{report.totals.sessionCount}}</td>
+            <td class="num">{{report.totals.duration}}</td>
+            <td class="num">{{num report.totals.energyKwh 2}} kWh</td>
+            <td class="num">{{money report.totals.cost}}</td>
+          </tr>
+        </tfoot>
+      </table>
+    {{else}}
+      <div class="empty">Im Abrechnungszeitraum wurden keine Ladevorgänge aufgezeichnet.</div>
+    {{/if}}
+  </section>
+
+  {{#if report.rows.length}}
+  <section>
+    <h2>Einzelnachweis <span class="count">({{report.totals.sessionCount}} Ladevorgänge)</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Beginn</th>
+          <th>Ende</th>
+          <th class="num">Dauer</th>
+          <th>Ladekarte</th>
+          <th class="num">Energie</th>
+          <th class="num">Betrag</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each report.rows}}
+          <tr>
+            <td>{{this.date}}</td>
+            <td>{{this.startTime}}</td>
+            <td>{{this.endTime}}</td>
+            <td class="num">{{this.duration}}</td>
+            <td class="name-cell">{{this.name}}</td>
+            <td class="num">{{num this.energyKwh 3}} kWh</td>
+            <td class="num">{{money this.cost}}</td>
+          </tr>
+        {{/each}}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="5">Summe</td>
+          <td class="num">{{num report.totals.energyKwh 3}} kWh</td>
+          <td class="num">{{money report.totals.cost}}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+  {{/if}}
+
+  <div class="settlement">
+    <div class="line"><span>Abrechenbare Energie</span><span>{{num report.totals.billableEnergyKwh 3}} kWh</span></div>
+    <div class="line"><span>Arbeitspreis je kWh</span><span>{{money report.pricePerKwh 4}}</span></div>
+    <div class="total">
+      <span class="label">Erstattungsbetrag</span>
+      <span class="amount">{{money report.totals.billableCost}}</span>
+    </div>
+  </div>
+
+  {{#if report.totals.unknownRfidCount}}
+    <div class="notice">
+      <strong>Hinweis:</strong> {{report.totals.unknownRfidCount}} Ladekarte(n) sind keinem Nutzer zugeordnet.
+      Die Zuordnung lässt sich in den Einstellungen des Dashboards unter „RFID-Mapping“ ergänzen.
+    </div>
+  {{/if}}
+
+  <div class="footnote">
+    {{#if settings.billing.footerNote}}{{settings.billing.footerNote}}<br>{{/if}}
+    Die ausgewiesenen Energiemengen stammen aus der Ladehistorie der Wallbox
+    „{{settings.wallbox.displayName}}“ und wurden automatisiert ausgelesen.
+    Zeitzone: {{report.timezone}}. Alle Beträge in {{report.currency}}.
+    Dokument maschinell erstellt am {{generatedAtLabel}} – ohne Unterschrift gültig.
+  </div>
+
+</body>
+</html>

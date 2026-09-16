@@ -1,0 +1,184 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+
+  <!-- Verbindungsstatus des SSE-Streams -->
+  <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Live-Übersicht</h1>
+      <p class="mt-0.5 text-sm text-slate-400">Echtzeitdaten der Wallbox, aktualisiert alle <%= Math.round(pollIntervalMs / 1000) %> Sekunden.</p>
+    </div>
+    <div id="connection" class="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs">
+      <span id="connection-dot" class="h-2 w-2 rounded-full bg-slate-500" aria-hidden="true"></span>
+      <span id="connection-text" class="text-slate-400">Verbinde …</span>
+    </div>
+  </div>
+
+  <!-- Fehlerbanner, nur bei Problemen sichtbar -->
+  <div id="error-banner" class="mb-5 hidden rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200" role="alert">
+    <span class="font-semibold">Wallbox nicht erreichbar:</span>
+    <span id="error-message"></span>
+  </div>
+
+  <!-- ===================== Hauptkachel: aktuelle Ladeleistung ===================== -->
+  <section class="grid gap-4 lg:grid-cols-3">
+
+    <div class="lg:col-span-2 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 to-slate-900/40 p-6">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="text-xs font-medium uppercase tracking-widest text-slate-400">Aktuelle Ladeleistung</p>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span id="power-value" class="text-6xl font-bold tabular-nums tracking-tight text-white">–</span>
+            <span class="text-2xl font-semibold text-slate-400">kW</span>
+          </div>
+          <p id="power-detail" class="mt-2 text-sm text-slate-400">Warte auf Daten …</p>
+        </div>
+
+        <!-- Statusanzeige mit Puls-Animation während des Ladens -->
+        <div class="text-right">
+          <div class="relative inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold"
+               id="status-pill">
+            <span class="relative flex h-2.5 w-2.5" aria-hidden="true">
+              <span id="status-ping" class="absolute inline-flex h-full w-full rounded-full opacity-0"></span>
+              <span id="status-dot" class="relative inline-flex h-2.5 w-2.5 rounded-full bg-slate-500"></span>
+            </span>
+            <span id="status-label">Unbekannt</span>
+          </div>
+          <p id="status-updated" class="mt-2 text-xs text-slate-500">–</p>
+        </div>
+      </div>
+
+      <!-- Leistungsverlauf der laufenden Sitzung (rein clientseitig gepuffert) -->
+      <div class="mt-6">
+        <div class="flex items-center justify-between text-xs text-slate-500">
+          <span>Verlauf (letzte <span id="spark-window">0</span> Messwerte)</span>
+          <span>Max <span id="spark-max" class="tabular-nums">0,0</span> kW</span>
+        </div>
+        <div class="relative mt-2">
+          <svg id="sparkline" class="h-24 w-full" viewBox="0 0 600 100" preserveAspectRatio="none" role="img" aria-label="Verlauf der Ladeleistung">
+            <defs>
+              <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stop-color="#34d399" stop-opacity=".35"/>
+                <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <!-- Grundlinie: die Flaeche wirkt sonst kaputt, solange noch keine Messwerte da sind. -->
+            <line x1="0" y1="97" x2="600" y2="97" stroke="currentColor" stroke-width="1"
+                  class="text-white/10" vector-effect="non-scaling-stroke"/>
+            <path id="spark-area" fill="url(#sparkFill)" d=""></path>
+            <path id="spark-line" fill="none" stroke="#34d399" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" d=""></path>
+          </svg>
+          <p id="spark-hint" class="absolute inset-0 grid place-items-center text-xs text-slate-500">
+            Sammelt Messwerte …
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ladekarte / RFID -->
+    <div class="rounded-2xl border border-white/10 bg-slate-900 p-6">
+      <p class="text-xs font-medium uppercase tracking-widest text-slate-400">Aktive Ladekarte</p>
+      <p id="rfid-name" class="mt-3 text-2xl font-semibold text-white">–</p>
+      <p id="rfid-id" class="mt-1 font-mono text-xs text-slate-500">keine Karte erkannt</p>
+
+      <dl class="mt-6 space-y-3 border-t border-white/10 pt-4 text-sm">
+        <div class="flex items-center justify-between">
+          <dt class="text-slate-400">Energie (Sitzung)</dt>
+          <dd id="session-energy" class="font-semibold tabular-nums">–</dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-slate-400">Ladedauer</dt>
+          <dd id="session-duration" class="font-semibold tabular-nums">–</dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-slate-400">Strom</dt>
+          <dd id="current" class="font-semibold tabular-nums">–</dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-slate-400">Spannung</dt>
+          <dd id="voltage" class="font-semibold tabular-nums">–</dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-slate-400">Zählerstand</dt>
+          <dd id="meter" class="font-semibold tabular-nums">–</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ===================== Monatsvorschau ===================== -->
+  <section class="mt-8">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold tracking-tight">Abrechnungsvorschau</h2>
+        <p class="mt-0.5 text-sm text-slate-400">Aus der Ladehistorie der Wallbox berechnet – Grundlage für PDF und CSV.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <label for="period" class="sr-only">Abrechnungsmonat</label>
+        <select id="period" class="rounded-lg border border-white/10 bg-slate-900 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"></select>
+        <button id="reload-report" type="button"
+                class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium hover:bg-white/10">
+          Aktualisieren
+        </button>
+      </div>
+    </div>
+
+    <div id="report-loading" class="mt-4 rounded-xl border border-white/10 bg-slate-900 px-4 py-8 text-center text-sm text-slate-400">
+      Lade Abrechnungsdaten …
+    </div>
+
+    <div id="report-content" class="mt-4 hidden">
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="rounded-xl border border-white/10 bg-slate-900 p-4">
+          <p class="text-xs uppercase tracking-widest text-slate-400">Energie gesamt</p>
+          <p class="mt-1 text-2xl font-bold tabular-nums"><span id="kpi-energy">–</span> <span class="text-base font-medium text-slate-400">kWh</span></p>
+        </div>
+        <div class="rounded-xl border border-white/10 bg-slate-900 p-4">
+          <p class="text-xs uppercase tracking-widest text-slate-400">Ladevorgänge</p>
+          <p class="mt-1 text-2xl font-bold tabular-nums" id="kpi-sessions">–</p>
+        </div>
+        <div class="rounded-xl border border-white/10 bg-slate-900 p-4">
+          <p class="text-xs uppercase tracking-widest text-slate-400">Ladezeit</p>
+          <p class="mt-1 text-2xl font-bold tabular-nums" id="kpi-duration">–</p>
+        </div>
+        <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+          <p class="text-xs uppercase tracking-widest text-emerald-300/80">Erstattungsbetrag</p>
+          <p class="mt-1 text-2xl font-bold tabular-nums text-emerald-300" id="kpi-cost">–</p>
+        </div>
+      </div>
+
+      <div class="mt-4 overflow-hidden rounded-xl border border-white/10 bg-slate-900">
+        <table class="w-full text-sm">
+          <caption class="sr-only">Verbrauch je Ladekarte im gewählten Abrechnungsmonat</caption>
+          <thead class="bg-white/5 text-xs uppercase tracking-wider text-slate-400">
+            <tr>
+              <th scope="col" class="px-4 py-2.5 text-left font-semibold">Ladekarte</th>
+              <th scope="col" class="px-4 py-2.5 text-left font-semibold">RFID</th>
+              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Vorgänge</th>
+              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Ladezeit</th>
+              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Energie</th>
+              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Betrag</th>
+            </tr>
+          </thead>
+          <tbody id="report-rows" class="divide-y divide-white/5"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Server-gerenderte Startdaten. type="application/json" wird nicht ausgeführt;
+     das Nonce deckt die CSP dennoch sauber ab. -->
+<script id="bootstrap-data" type="application/json" nonce="<%= cspNonce %>">
+  <%- JSON.stringify({
+        initialState: initialState || null,
+        currency: settings.billing.currency,
+        locale: settings.billing.locale,
+        timezone: settings.billing.timezone,
+      }) %>
+</script>
+<script src="/static/js/dashboard.js" nonce="<%= cspNonce %>"></script>
+
+<%- include('partials/foot') %>

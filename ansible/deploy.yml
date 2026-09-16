@@ -1,0 +1,229 @@
+---
+# =============================================================================
+#  Deployment der Mennekes-Wallbox-Abrechnung als Docker-Container.
+#
+#  Aufruf:
+#    ansible-playbook -i inventory.ini deploy.yml
+#    ansible-playbook -i inventory.ini deploy.yml --tags config   # nur .env neu schreiben
+#    ansible-playbook -i inventory.ini deploy.yml --check --diff  # Trockenlauf
+#
+#  Secrets gehören in eine Ansible-Vault-Datei, nicht in group_vars/all.yml:
+#    ansible-vault create group_vars/all/vault.yml
+# =============================================================================
+
+- name: Mennekes Wallbox Billing ausrollen
+  hosts: wallbox_billing
+  become: true
+
+  vars:
+    app_name: mennekes-wallbox-billing
+    app_dir: /opt/mennekes-billing
+    app_user: wallbox
+    app_group: wallbox
+    compose_project: mennekes-billing
+
+    # --- Werte, die typischerweise pro Host überschrieben werden ------------
+    # (siehe group_vars/all.yml.example)
+    app_port: 3000
+    app_timezone: Europe/Berlin
+
+  pre_tasks:
+    - name: Pflichtvariablen prüfen
+      # Lieber hier hart abbrechen als später einen Container ohne Passwort starten.
+      ansible.builtin.assert:
+        that:
+          - auth_password is defined and auth_password | length >= 12
+          - mennekes_base_url is defined and mennekes_base_url | length > 0
+          - mail_to is defined and mail_to | length > 0
+        fail_msg: >-
+          Fehlende oder zu schwache Variablen. Benötigt: auth_password (>= 12 Zeichen),
+          mennekes_base_url, mail_to. Vorlage: group_vars/all.yml.example
+        quiet: true
+      tags: [always]
+
+  tasks:
+    # ------------------------------------------------------------ Docker -----
+    - name: Docker-Voraussetzungen installieren
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == 'Debian'
+      tags: [docker]
+
+    - name: Docker-GPG-Schlüssel hinterlegen
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+      when: ansible_os_family == 'Debian'
+      tags: [docker]
+
+    - name: Docker-Repository einbinden
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}
+          signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ ansible_distribution | lower }}
+          {{ ansible_distribution_release }} stable
+        filename: docker
+        state: present
+      when: ansible_os_family == 'Debian'
+      tags: [docker]
+
+    - name: Docker Engine und Compose-Plugin installieren
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+      when: ansible_os_family == 'Debian'
+      notify: Docker neu starten
+      tags: [docker]
+
+    - name: Docker-Dienst aktivieren
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+      tags: [docker]
+
+    # ------------------------------------------------------- Systemnutzer ----
+    - name: Systemgruppe anlegen
+      ansible.builtin.group:
+        name: "{{ app_group }}"
+        system: true
+        state: present
+      tags: [setup]
+
+    - name: Systemnutzer anlegen
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        group: "{{ app_group }}"
+        groups: docker
+        append: true
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+        state: present
+      tags: [setup]
+
+    # ------------------------------------------------------ Projektdateien ---
+    - name: Projektverzeichnis anlegen
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0750'
+      tags: [setup]
+
+    - name: Anwendungsdateien übertragen
+      ansible.posix.synchronize:
+        src: "{{ playbook_dir }}/../"
+        dest: "{{ app_dir }}/"
+        delete: true
+        recursive: true
+        rsync_opts:
+          # Nichts übertragen, was auf dem Zielhost nichts zu suchen hat:
+          # lokale Secrets, node_modules (wird im Image gebaut), Tests, Git.
+          - "--exclude=.git"
+          - "--exclude=node_modules"
+          - "--exclude=.env"
+          - "--exclude=data"
+          - "--exclude=coverage"
+          - "--exclude=ansible"
+          - "--exclude=.github"
+      become_user: root
+      notify: Container neu bauen und starten
+      tags: [deploy]
+
+    - name: Dateirechte setzen
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        recurse: true
+      tags: [deploy]
+
+    # --------------------------------------------------------------- .env ----
+    - name: .env aus Ansible-Variablen erzeugen
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ app_dir }}/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        # 0640: nur der App-Nutzer darf die Secrets lesen.
+        mode: '0640'
+        # Backups mit Secrets sind ein Risiko - bewusst deaktiviert.
+        backup: false
+      no_log: true
+      notify: Container neu bauen und starten
+      tags: [config, deploy]
+
+    - name: Datenverzeichnis für Reports anlegen
+      ansible.builtin.file:
+        path: "{{ app_dir }}/data/reports"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0750'
+      tags: [setup]
+
+    # ---------------------------------------------------------- Container ----
+    - name: Container bauen und starten
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        project_name: "{{ compose_project }}"
+        build: always
+        pull: missing
+        state: present
+        remove_orphans: true
+      register: compose_result
+      tags: [deploy]
+
+    - name: Auf Erreichbarkeit der WebUI warten
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app_port }}/api/health"
+        user: "{{ auth_user | default('admin') }}"
+        password: "{{ auth_password }}"
+        force_basic_auth: true
+        # 503 ist in Ordnung: die App läuft, nur die Wallbox antwortet (noch) nicht.
+        status_code: [200, 503]
+      register: health
+      until: health.status in [200, 503]
+      retries: 12
+      delay: 5
+      no_log: true
+      tags: [deploy, verify]
+
+    - name: Ergebnis ausgeben
+      ansible.builtin.debug:
+        msg:
+          - "Deployment abgeschlossen auf {{ inventory_hostname }}"
+          - "WebUI:   http://{{ ansible_host | default(inventory_hostname) }}:{{ app_port }}/"
+          - "Status:  HTTP {{ health.status }} {{ '(Wallbox erreichbar)' if health.status == 200 else '(App läuft, Wallbox nicht erreichbar - MENNEKES_BASE_URL prüfen)' }}"
+          - "Verzeichnis: {{ app_dir }}"
+      tags: [deploy, verify]
+
+  handlers:
+    - name: Docker neu starten
+      ansible.builtin.service:
+        name: docker
+        state: restarted
+
+    - name: Container neu bauen und starten
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        project_name: "{{ compose_project }}"
+        build: always
+        state: restarted

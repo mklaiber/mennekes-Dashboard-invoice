@@ -1,0 +1,32 @@
+# Abhängigkeiten
+node_modules/
+
+# Secrets - NIEMALS committen
+.env
+.env.*
+!.env.example
+
+# Laufzeitdaten (Einstellungen, erzeugte PDFs/CSVs)
+data/
+*.pdf
+*.csv
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test- und Build-Artefakte
+coverage/
+.nyc_output/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Ansible
+ansible/inventory.ini
+ansible/group_vars/all.yml
+ansible/*.retry
