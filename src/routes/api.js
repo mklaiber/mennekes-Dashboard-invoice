@@ -10,8 +10,10 @@ const path = require('path');
 const fs = require('fs');
 const config = require('../config');
 const logger = require('../utils/logger');
-const settingsStore = require('../config/settings');
+const settingsStore = require('../repositories/settingsRepository');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { requireRole } = require('../middleware/auth');
+const audit = require('../repositories/auditRepository');
 const { buildReportForMonth, runMonthlyReport, listGeneratedFiles } = require('../services/reportService');
 const { enrichWithIdentity } = require('../services/liveFeed');
 const { previousMonth } = require('../utils/dates');
@@ -104,13 +106,24 @@ function createApiRouter({ liveFeed, mennekesClient }) {
    * POST /api/report/run - Abrechnung erzeugen.
    * Body: { year?, month?, sendMail?: boolean, to?: string[] }
    */
-  router.post('/report/run', asyncHandler(async (req, res) => {
+  router.post('/report/run', requireRole('admin'), asyncHandler(async (req, res) => {
     const { year, month } = parsePeriod(req.body || {});
     const sendMail = req.body?.sendMail !== false;
     const to = Array.isArray(req.body?.to) && req.body.to.length > 0 ? req.body.to : undefined;
 
     logger.info(`Manueller Report-Lauf angefordert: ${year}-${month} (Mailversand: ${sendMail}).`);
-    const result = await runMonthlyReport({ year, month, sendMail, to, client: mennekesClient });
+    const result = await runMonthlyReport({
+      year, month, sendMail, to,
+      client: mennekesClient,
+      triggeredBy: `manual:${req.user.username}`,
+    });
+
+    audit.log({
+      action: audit.ACTIONS.REPORT_RUN,
+      user: req.user,
+      detail: `${result.report.period.label}: ${result.report.totals.energyKwh} kWh, Versand ${sendMail ? 'ja' : 'nein'}`,
+      ip: req.ip,
+    });
 
     res.json({
       ok: true,
@@ -164,7 +177,7 @@ function createApiRouter({ liveFeed, mennekesClient }) {
    * Es wird gezielt gewhitelistet: unbekannte Felder aus dem Body werden verworfen,
    * damit über die API keine Secrets in settings.json geschmuggelt werden können.
    */
-  router.put('/settings', asyncHandler(async (req, res) => {
+  router.put('/settings', requireRole('admin'), asyncHandler(async (req, res) => {
     const body = req.body || {};
     const patch = {};
 
@@ -192,6 +205,24 @@ function createApiRouter({ liveFeed, mennekesClient }) {
       for (const key of ['currency', 'locale', 'timezone', 'companyName', 'employeeName', 'vehiclePlate', 'logoUrl', 'footerNote']) {
         if (typeof body.billing[key] === 'string') patch.billing[key] = body.billing[key].trim().slice(0, 500);
       }
+      if (body.billing.margins && typeof body.billing.margins === 'object') {
+        // Ränder werden hier geprüft UND beim Rendern noch einmal begrenzt:
+        // settings.json lässt sich auch von Hand bearbeiten.
+        const margins = {};
+        for (const side of ['top', 'right', 'bottom', 'left']) {
+          if (body.billing.margins[side] === undefined) continue;
+          const value = Number.parseFloat(body.billing.margins[side]);
+          if (!Number.isFinite(value) || value < 5 || value > 60) {
+            throw badRequest(
+              `Seitenrand "${side}" muss zwischen 5 und 60 mm liegen (übliche Drucker `
+              + 'können die äußersten 5 mm nicht bedrucken).'
+            );
+          }
+          margins[side] = value;
+        }
+        if (Object.keys(margins).length > 0) patch.billing.margins = margins;
+      }
+
       if (patch.billing.timezone) {
         // Ungültige Zeitzone würde erst am Monatsende beim Rendern knallen.
         try {
@@ -239,7 +270,15 @@ function createApiRouter({ liveFeed, mennekesClient }) {
       }
     }
 
-    const saved = settingsStore.save(patch);
+    const saved = settingsStore.save(patch, { userId: req.user.id });
+
+    audit.log({
+      action: Array.isArray(body.rfidMappings) ? audit.ACTIONS.RFID_UPDATED : audit.ACTIONS.SETTINGS_UPDATED,
+      user: req.user,
+      detail: Object.keys(patch).join(', '),
+      ip: req.ip,
+    });
+
     res.json({ ok: true, settings: saved });
   }));
 
@@ -255,6 +294,7 @@ function createApiRouter({ liveFeed, mennekesClient }) {
       status: wallbox.reachable ? 'ok' : 'degraded',
       uptimeSeconds: Math.round(process.uptime()),
       wallbox,
+      database: { ok: true, users: require('../repositories/userRepository').count() },
       liveSubscribers: liveFeed.subscriberCount,
       version: require('../../package.json').version,
     });

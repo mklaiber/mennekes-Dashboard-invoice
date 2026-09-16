@@ -1,9 +1,17 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const config = require('../src/config');
-const settingsStore = require('../src/config/settings');
+const settingsStore = require('../src/repositories/settingsRepository');
+const { resetDatabase, createUser } = require('./helpers/testDb');
+const database = require('../src/db');
+
+// Jeder Test startet mit einer frischen, leeren Datenbank.
+beforeEach(() => {
+  resetDatabase();
+});
 
 describe('assertProductionSecrets', () => {
   /** Baut eine minimale, gültige Konfiguration zum Abwandeln. */
@@ -46,17 +54,13 @@ describe('assertProductionSecrets', () => {
   });
 });
 
-describe('Einstellungs-Speicher', () => {
-  beforeEach(() => {
-    settingsStore.reset();
-    if (fs.existsSync(config.server.settingsFile)) fs.unlinkSync(config.server.settingsFile);
-  });
-
+describe('Einstellungs-Speicher (SQLite)', () => {
   it('liefert Defaults, wenn noch nichts gespeichert wurde', () => {
     const settings = settingsStore.load({ force: true });
 
     expect(settings.billing.pricePerKwh).toBe(0.3);
     expect(settings.billing.timezone).toBe('Europe/Berlin');
+    expect(settings.billing.margins).toEqual({ top: 20, right: 20, bottom: 20, left: 25 });
     expect(settings.rfidMappings).toEqual([]);
   });
 
@@ -71,35 +75,105 @@ describe('Einstellungs-Speicher', () => {
     expect(settings.mail.from).toBeDefined();
   });
 
-  it('ersetzt Arrays komplett statt sie zu mischen', () => {
-    settingsStore.save({ rfidMappings: [{ rfid: 'A', name: 'Alt' }, { rfid: 'B', name: 'Alt2' }] });
-    settingsStore.save({ rfidMappings: [{ rfid: 'C', name: 'Neu' }] });
+  it('merged auch verschachtelte Zweige wie die Seitenränder', () => {
+    settingsStore.save({ billing: { margins: { left: 30 } } });
 
-    expect(settingsStore.load({ force: true }).rfidMappings).toEqual([{ rfid: 'C', name: 'Neu' }]);
+    const margins = settingsStore.load({ force: true }).billing.margins;
+    expect(margins.left).toBe(30);
+    // Die übrigen Ränder behalten ihren Wert.
+    expect(margins.top).toBe(20);
+    expect(margins.right).toBe(20);
   });
 
-  it('schreibt die Datei atomar (kein tmp-Rest)', () => {
-    settingsStore.save({ billing: { pricePerKwh: 0.33 } });
+  it('ersetzt die RFID-Liste komplett statt sie zu mischen', () => {
+    settingsStore.save({ rfidMappings: [{ rfid: 'AAAA', name: 'Alt' }, { rfid: 'BBBB', name: 'Alt2' }] });
+    settingsStore.save({ rfidMappings: [{ rfid: 'CCCC', name: 'Neu' }] });
 
-    const dir = path.dirname(config.server.settingsFile);
-    expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
-    expect(JSON.parse(fs.readFileSync(config.server.settingsFile, 'utf8')).billing.pricePerKwh).toBe(0.33);
+    const mappings = settingsStore.load({ force: true }).rfidMappings;
+    expect(mappings).toHaveLength(1);
+    expect(mappings[0]).toMatchObject({ rfid: 'cccc', rfidRaw: 'CCCC', name: 'Neu', billable: true });
   });
 
-  it('fällt bei defekter Datei auf Defaults zurück, statt zu crashen', () => {
-    fs.mkdirSync(path.dirname(config.server.settingsFile), { recursive: true });
-    fs.writeFileSync(config.server.settingsFile, '{ das ist kein JSON', 'utf8');
+  it('normalisiert die RFID beim Speichern und behält die Schreibweise', () => {
+    settingsStore.save({ rfidMappings: [{ rfid: '04:A1:B2:C3', name: 'Max', plate: 'M-EV 1' }] });
 
-    const settings = settingsStore.load({ force: true });
-    expect(settings.billing.pricePerKwh).toBe(0.3);
+    const entry = settingsStore.load({ force: true }).rfidMappings[0];
+    expect(entry.rfid).toBe('04a1b2c3');
+    expect(entry.rfidRaw).toBe('04:A1:B2:C3');
+  });
+
+  it('lässt doppelte Schreibweisen derselben Karte nicht durch', () => {
+    // Ohne diese Abwehr würde das UNIQUE auf der normalisierten ID zuschlagen.
+    settingsStore.save({
+      rfidMappings: [
+        { rfid: '04:A1:B2:C3', name: 'Erster' },
+        { rfid: '04a1b2c3', name: 'Zweiter' },
+      ],
+    });
+
+    const mappings = settingsStore.load({ force: true }).rfidMappings;
+    expect(mappings).toHaveLength(1);
+    expect(mappings[0].name).toBe('Erster');
+  });
+
+  it('verwirft Einträge ohne RFID', () => {
+    settingsStore.save({ rfidMappings: [{ rfid: '  ', name: 'Leer' }, { rfid: 'OK01', name: 'Gut' }] });
+
+    expect(settingsStore.load({ force: true }).rfidMappings).toHaveLength(1);
   });
 
   it('cacht Lesezugriffe, bis force übergeben wird', () => {
     const first = settingsStore.load();
-    fs.writeFileSync(config.server.settingsFile, JSON.stringify({ billing: { pricePerKwh: 9.99 } }), 'utf8');
+    expect(settingsStore.load()).toBe(first);
 
-    expect(settingsStore.load()).toBe(first);                     // Cache
-    expect(settingsStore.load({ force: true }).billing.pricePerKwh).toBe(9.99);
+    settingsStore.save({ billing: { pricePerKwh: 0.77 } });
+    // save() verwirft den Cache selbst.
+    expect(settingsStore.load().billing.pricePerKwh).toBe(0.77);
+  });
+
+  it('vermerkt, wer zuletzt gespeichert hat', async () => {
+    const admin = await createUser({ username: 'pruefer' });
+    settingsStore.save({ billing: { pricePerKwh: 0.31 } }, { userId: admin.id });
+
+    const row = database.db().prepare('SELECT updated_by AS updatedBy FROM settings WHERE key = ?').get('billing');
+    expect(row.updatedBy).toBe(admin.id);
+  });
+
+  it('übernimmt eine vorhandene settings.json einmalig', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-')), 'settings.json');
+    fs.writeFileSync(file, JSON.stringify({
+      billing: { pricePerKwh: 0.55, companyName: 'Aus Datei' },
+      rfidMappings: [{ rfid: 'FILE01', name: 'Aus Datei' }],
+    }), 'utf8');
+
+    expect(settingsStore.migrateFromJsonFile(file)).toBe(true);
+
+    const settings = settingsStore.load({ force: true });
+    expect(settings.billing.pricePerKwh).toBe(0.55);
+    expect(settings.billing.companyName).toBe('Aus Datei');
+    expect(settings.rfidMappings[0].rfid).toBe('file01');
+
+    // Die Datei wird umbenannt, damit die Migration nicht erneut läuft.
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(`${file}.migrated`)).toBe(true);
+  });
+
+  it('migriert nicht, wenn bereits Einstellungen in der Datenbank stehen', () => {
+    settingsStore.save({ billing: { pricePerKwh: 0.99 } });
+
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-')), 'settings.json');
+    fs.writeFileSync(file, JSON.stringify({ billing: { pricePerKwh: 0.11 } }), 'utf8');
+
+    expect(settingsStore.migrateFromJsonFile(file)).toBe(false);
+    expect(settingsStore.load({ force: true }).billing.pricePerKwh).toBe(0.99);
+  });
+
+  it('übersteht eine defekte settings.json ohne Absturz', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-')), 'settings.json');
+    fs.writeFileSync(file, '{ das ist kein JSON', 'utf8');
+
+    expect(settingsStore.migrateFromJsonFile(file)).toBe(false);
+    expect(settingsStore.load({ force: true }).billing.pricePerKwh).toBe(0.3);
   });
 });
 
@@ -131,5 +205,36 @@ describe('rfidLookup', () => {
   it('überspringt Einträge ohne RFID', () => {
     const lookup = settingsStore.rfidLookup([{ name: 'Ohne ID' }, null, { rfid: 'OK', name: 'Gut' }]);
     expect(lookup.size).toBe(1);
+  });
+});
+
+describe('Datenbankpfad', () => {
+  it('lässt den SQLite-Sonderwert ":memory:" unangetastet', () => {
+    // path.resolve(':memory:') ergäbe einen absoluten Pfad - SQLite legte dann
+    // eine echte Datei namens ":memory:" im Arbeitsverzeichnis an.
+    const original = process.env.DATABASE_FILE;
+    process.env.DATABASE_FILE = ':memory:';
+    try {
+      jest.resetModules();
+      const fresh = require('../src/config');
+      expect(fresh.server.databaseFile).toBe(':memory:');
+    } finally {
+      process.env.DATABASE_FILE = original;
+      jest.resetModules();
+    }
+  });
+
+  it('löst einen normalen Pfad absolut auf', () => {
+    const original = process.env.DATABASE_FILE;
+    process.env.DATABASE_FILE = 'data/beispiel.sqlite';
+    try {
+      jest.resetModules();
+      const fresh = require('../src/config');
+      expect(path.isAbsolute(fresh.server.databaseFile)).toBe(true);
+      expect(fresh.server.databaseFile).toMatch(/beispiel\.sqlite$/);
+    } finally {
+      process.env.DATABASE_FILE = original;
+      jest.resetModules();
+    }
   });
 });

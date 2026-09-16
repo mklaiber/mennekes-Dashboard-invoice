@@ -4,11 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="dark light">
+  <% if (typeof csrfToken !== 'undefined' && csrfToken) { %>
+  <meta name="csrf-token" content="<%= csrfToken %>">
+  <% } %>
   <title><%= title %> &middot; Wallbox-Abrechnung</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>">
-  <!-- Notfall-Styles zuerst: greifen nur, wenn das Tailwind-CDN nicht erreichbar ist. -->
-  <link rel="stylesheet" href="/static/css/fallback.css">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/static/js/tailwind-config.js"></script>
+
+  <!-- Selbst gehostet: die Oberfläche funktioniert auch ohne Internetzugang. -->
+  <link rel="stylesheet" href="/static/css/material.css">
+
+  <!-- Roboto als Verbesserung; ohne Netz greift der System-Zeichensatz. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap">
+
+  <script src="/static/js/material.js" nonce="<%= cspNonce %>" defer></script>
 </head>
-<body class="h-full bg-slate-950 text-slate-100 antialiased">
+<body>
+<div class="md-app">

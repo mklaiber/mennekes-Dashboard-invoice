@@ -5,6 +5,10 @@
  *
  * Als Factory gebaut (und nicht als Singleton), damit `supertest` in den Tests
  * eine frische App mit gemockten Abhängigkeiten erzeugen kann.
+ *
+ * Reihenfolge der Middleware ist hier sicherheitsrelevant:
+ *   Header -> Body -> Cookies -> Benutzer anhängen -> CSRF -> öffentliche
+ *   Routen (Login) -> Anmeldezwang -> Passwortzwang -> geschützte Routen.
  */
 
 const path = require('path');
@@ -12,12 +16,18 @@ const crypto = require('crypto');
 const express = require('express');
 const helmet = require('helmet');
 const compression = require('compression');
+const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
-const { createAuthMiddleware } = require('./middleware/auth');
+const settingsStore = require('./repositories/settingsRepository');
+const {
+  attachUser, requireAuth, requireRole, requirePasswordChange, csrfProtection,
+} = require('./middleware/auth');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { createApiRouter } = require('./routes/api');
 const { createViewRouter } = require('./routes/views');
+const { createAuthRouter, createAccountRouter } = require('./routes/auth');
+const { createUserRouter } = require('./routes/users');
 const MennekesClient = require('./services/mennekesClient');
 const LiveFeed = require('./services/liveFeed');
 
@@ -25,7 +35,6 @@ const LiveFeed = require('./services/liveFeed');
  * @param {object} [deps]
  * @param {MennekesClient} [deps.mennekesClient]
  * @param {LiveFeed} [deps.liveFeed]
- * @param {object} [deps.auth] {user, password} - überschreibt config.auth
  * @returns {{app: import('express').Express, liveFeed: LiveFeed, mennekesClient: MennekesClient}}
  */
 function createApp(deps = {}) {
@@ -34,19 +43,17 @@ function createApp(deps = {}) {
 
   const app = express();
 
-  // Hinter einem Reverse-Proxy: echte Client-IP für Rate-Limit und Logging.
+  // Hinter einem Reverse-Proxy: echte Client-IP für Rate-Limit und Protokoll.
   if (config.server.trustProxy) app.set('trust proxy', 1);
 
   app.set('view engine', 'ejs');
   app.set('views', path.join(__dirname, '..', 'views'));
-  // Kein "X-Powered-By: Express" - unnötige Information über den Stack.
   app.disable('x-powered-by');
 
   // --------------------------------------------------------------- Sicherheit
 
-  // Pro Request ein CSP-Nonce. Damit können die Views die wenigen nötigen
-  // Inline-Skripte (Bootstrap-Daten aus dem Server-Rendering) ausliefern,
-  // ohne 'unsafe-inline' für Skripte global freizugeben.
+  // Pro Request ein CSP-Nonce für die wenigen nötigen Inline-Skripte
+  // (Bootstrap-Daten aus dem Server-Rendering).
   app.use((req, res, next) => {
     res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
     next();
@@ -56,14 +63,10 @@ function createApp(deps = {}) {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // Tailwind wird per CDN geladen (Play-CDN erzeugt Styles zur Laufzeit,
-        // deshalb sind 'unsafe-inline' für Styles und der CDN-Host nötig).
-        scriptSrc: [
-          "'self'",
-          'https://cdn.tailwindcss.com',
-          (req, res) => `'nonce-${res.locals.cspNonce}'`,
-        ],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://cdn.tailwindcss.com', 'https://fonts.googleapis.com'],
+        // Kein Fremd-Host mehr: das Material-Stylesheet liegt lokal.
+        scriptSrc: ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
+        // 'unsafe-inline' nur für Styles: die Sparkline setzt Attribute per style.
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
         imgSrc: ["'self'", 'data:', 'https:'],
         connectSrc: ["'self'"],
@@ -73,7 +76,6 @@ function createApp(deps = {}) {
         formAction: ["'self'"],
       },
     },
-    // HSTS nur sinnvoll, wenn die App tatsächlich per TLS ausgeliefert wird.
     hsts: config.isProduction ? { maxAge: 31536000, includeSubDomains: true } : false,
     crossOriginEmbedderPolicy: false,
   }));
@@ -89,9 +91,8 @@ function createApp(deps = {}) {
 
   app.use(express.json({ limit: '256kb' }));
   app.use(express.urlencoded({ extended: false, limit: '256kb' }));
+  app.use(cookieParser());
 
-  // Brute-Force-Bremse vor der Auth. Im Testbetrieb deaktiviert, sonst
-  // laufen parallele Testfälle in das Limit.
   if (!config.isTest) {
     app.use(rateLimit({
       windowMs: 15 * 60 * 1000,
@@ -102,18 +103,45 @@ function createApp(deps = {}) {
     }));
   }
 
-  // ------------------------------------------------ Auth: schützt ALLES ------
-  // Bewusst vor allen Routen und vor dem Static-Handler registriert.
-  app.use(createAuthMiddleware(deps.auth));
-
+  // Statische Dateien vor der Anmeldung: die Login-Seite braucht CSS und Schrift.
+  // Hier liegen ausschliesslich öffentliche Assets, keine Daten.
   app.use('/static', express.static(path.join(__dirname, '..', 'public'), {
     maxAge: config.isProduction ? '7d' : 0,
-    // Keine Verzeichnislistings.
     index: false,
     dotfiles: 'ignore',
   }));
 
+  // Einstellungen für JEDE View bereitstellen: die Navigation zeigt den
+  // Wallbox-Namen, die Fußzeile den Arbeitspreis. Ohne das müsste jede Route
+  // daran denken - und eine vergessene Zuweisung endet in einem 500er.
+  app.use((req, res, next) => {
+    try {
+      res.locals.settings = settingsStore.load();
+    } catch {
+      // Vor der ersten Migration kann die Tabelle noch leer sein.
+      res.locals.settings = settingsStore.defaultSettings();
+    }
+    res.locals.active = '';
+    next();
+  });
+
+  // ------------------------------------------------- Authentifizierungskette
+  app.use(attachUser());
+  app.use(csrfProtection());
+
+  // Öffentlich: nur Anmeldung und Abmeldung.
+  app.use('/', createAuthRouter());
+
+  // Ab hier ist eine Anmeldung Pflicht.
+  app.use(requireAuth());
+
+  // Der Passwortwechsel muss VOR requirePasswordChange stehen, sonst wäre die
+  // Seite, auf die dieser Zwang umleitet, selbst gesperrt.
+  app.use('/', createAccountRouter());
+  app.use(requirePasswordChange());
+
   // ------------------------------------------------------------------ Routen
+  app.use('/', createUserRouter());
   app.use('/api', createApiRouter({ liveFeed, mennekesClient }));
   app.use('/', createViewRouter({ liveFeed }));
 
@@ -124,3 +152,4 @@ function createApp(deps = {}) {
 }
 
 module.exports = { createApp };
+module.exports.requireRole = requireRole;

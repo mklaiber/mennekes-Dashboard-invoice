@@ -17,6 +17,14 @@ WORKDIR /app
 # Puppeteer soll beim Install kein eigenes Chromium herunterladen.
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 
+# better-sqlite3 bringt für gängige Plattformen fertige Binärpakete mit. Fehlt
+# eines (etwa auf einer ungewöhnlichen Architektur), übersetzt node-gyp selbst -
+# dafür sind diese Werkzeuge nötig. Sie bleiben in dieser Stufe und landen NICHT
+# im Laufzeit-Image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json* ./
 # `npm ci` bei vorhandener Lockfile (reproduzierbar), sonst `npm install`.
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
@@ -41,6 +49,7 @@ ENV NODE_ENV=production \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     PUPPETEER_NO_SANDBOX=true \
     OUTPUT_DIR=/app/data/reports \
+    DATABASE_FILE=/app/data/wallbox.sqlite \
     SETTINGS_FILE=/app/data/settings.json
 
 WORKDIR /app

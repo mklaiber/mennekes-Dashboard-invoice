@@ -15,10 +15,16 @@ log_level: info
 trust_proxy: false
 
 # ------------------------------- Secrets -------------------------------------
+# Start-Administrator. Wirkt nur beim allerersten Start; danach werden Konten
+# in der WebUI unter "Benutzer" verwaltet.
 auth_user: admin
 # Mindestens 12 Zeichen - das Playbook bricht sonst ab.
 # Erzeugen mit: openssl rand -base64 24
 auth_password: "BITTE-ERSETZEN-openssl-rand-base64-24"
+
+# Sitzungs-Cookie nur über HTTPS ausliefern. Ohne TLS davor auf false setzen,
+# sonst kommt das Cookie nicht an und niemand kann sich anmelden.
+session_cookie_secure: false
 
 smtp_host: smtp.example.com
 smtp_port: 587

@@ -24,7 +24,9 @@ services:
       - "${PORT:-3000}:3000"
 
     volumes:
-      # Persistenz für settings.json und die erzeugten PDFs/CSVs.
+      # Persistenz für die SQLite-Datenbank (Benutzer, Sitzungen, Einstellungen,
+      # RFID-Zuordnung, Protokoll) und die erzeugten PDFs/CSVs.
+      # Ohne dieses Volume wären nach einem Neustart alle Konten weg.
       - wallbox-data:/app/data
       # Zeitzone des Hosts übernehmen (schadet nicht, TZ ist zusätzlich gesetzt).
       - /etc/localtime:/etc/localtime:ro

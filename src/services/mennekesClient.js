@@ -16,7 +16,7 @@ const axios = require('axios');
 const https = require('https');
 const config = require('../config');
 const logger = require('../utils/logger');
-const { normalizeRfid } = require('../config/settings');
+const { normalizeRfid } = require('../utils/rfid');
 
 /** Status-Codes der Wallbox auf ein stabiles internes Vokabular abbilden. */
 const STATUS_MAP = {

@@ -8,7 +8,7 @@
  */
 
 const { formatDate, formatTime, formatDuration, isoDateInZone, monthRange } = require('../utils/dates');
-const { normalizeRfid } = require('../config/settings');
+const { normalizeRfid } = require('../utils/rfid');
 
 /** Rundung auf n Nachkommastellen ohne Float-Artefakte (0.1+0.2 Problem). */
 function round(value, decimals = 3) {

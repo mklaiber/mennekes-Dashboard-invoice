@@ -1,9 +1,14 @@
 'use strict';
 
 const { buildMonthlyReport, calculateCost, resolveRfid, round, formatCurrency } = require('../src/services/billing');
-const { rfidLookup } = require('../src/config/settings');
+const { rfidLookup } = require('../src/repositories/settingsRepository');
+const { resetDatabase } = require('./helpers/testDb');
 const MennekesClient = require('../src/services/mennekesClient');
 const fixtures = require('./fixtures/wallbox');
+
+beforeEach(() => {
+  resetDatabase();
+});
 
 /** Baut aus den Fixtures normalisierte Sessions - so, wie der Client sie liefert. */
 function fixtureSessions() {

@@ -12,7 +12,7 @@
 const cron = require('node-cron');
 const config = require('../config');
 const logger = require('../utils/logger');
-const settingsStore = require('../config/settings');
+const settingsStore = require('../repositories/settingsRepository');
 const { runMonthlyReport } = require('../services/reportService');
 const { isLastDayOfMonth, partsInZone } = require('../utils/dates');
 
@@ -120,7 +120,7 @@ class ReportScheduler {
 
     try {
       logger.info(`Cron-Lauf startet Abrechnung für ${year}-${String(month).padStart(2, '0')}.`);
-      const result = await this.runner({ year, month, sendMail: true, client: this.client });
+      const result = await this.runner({ year, month, sendMail: true, client: this.client, triggeredBy: 'cron' });
 
       this.lastRun = {
         at: new Date().toISOString(),

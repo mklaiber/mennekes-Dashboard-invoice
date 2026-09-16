@@ -21,13 +21,20 @@ const path = require('path');
 const request = require('supertest');
 const { createApp } = require('../src/app');
 const config = require('../src/config');
-const settingsStore = require('../src/config/settings');
+const settingsStore = require('../src/repositories/settingsRepository');
+const { resetDatabase, createUser, login } = require('./helpers/testDb');
+const users = require('../src/repositories/userRepository');
 const MennekesClient = require('../src/services/mennekesClient');
 const LiveFeed = require('../src/services/liveFeed');
 const pdfService = require('../src/services/pdfService');
 const fixtures = require('./fixtures/wallbox');
 
-const CREDENTIALS = { user: 'testuser', pass: 'testpassword' };
+const CREDENTIALS = { user: 'testadmin', pass: 'test-passwort-1234' };
+
+/** Basic-Auth-Header für die maschinellen Zugriffe. */
+function basic(user = CREDENTIALS.user, pass = CREDENTIALS.pass) {
+  return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+}
 
 /** Wallbox-Attrappe für die App. */
 function fakeClient(overrides = {}) {
@@ -45,6 +52,8 @@ function fakeClient(overrides = {}) {
 let app;
 let liveFeed;
 let mennekesClient;
+/** Angemeldeter Administrator inkl. CSRF-Token - für die meisten Tests. */
+let admin;
 
 function build(clientOverrides = {}) {
   mennekesClient = fakeClient(clientOverrides);
@@ -53,16 +62,21 @@ function build(clientOverrides = {}) {
   return app;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
   pdfService._resetCaches();
-  settingsStore.reset();
+  resetDatabase();
+
+  await createUser({ username: CREDENTIALS.user, password: CREDENTIALS.pass, role: 'admin' });
+
   settingsStore.save({
     billing: { pricePerKwh: 0.3, timezone: 'Europe/Berlin', currency: 'EUR', locale: 'de-DE' },
     mail: { from: 'wallbox@example.com', to: ['buchhaltung@firma.de'], cc: [] },
     rfidMappings: fixtures.rfidMappings,
   });
+
   build();
+  admin = await login(request, app);
 });
 
 afterEach(() => {
@@ -70,46 +84,253 @@ afterEach(() => {
 });
 
 describe('Authentifizierung', () => {
-  it.each([
-    ['/', 'Dashboard'],
-    ['/einstellungen', 'Einstellungen'],
-    ['/api/status', 'Status-API'],
-    ['/api/report', 'Report-API'],
-    ['/api/settings', 'Settings-API'],
-    ['/api/health', 'Health-API'],
-    ['/static/js/dashboard.js', 'statische Dateien'],
-  ])('verlangt Anmeldung für %s (%s)', async (url) => {
-    const response = await request(app).get(url);
+  describe('ohne Anmeldung', () => {
+    it.each([
+      ['/', 'Dashboard'],
+      ['/einstellungen', 'Einstellungen'],
+      ['/benutzer', 'Benutzerverwaltung'],
+      ['/passwort', 'Passwortwechsel'],
+    ])('leitet %s (%s) zur Anmeldung um', async (url) => {
+      const response = await request(app).get(url);
 
-    expect(response.status).toBe(401);
-    expect(response.headers['www-authenticate']).toMatch(/Basic/);
+      expect(response.status).toBe(302);
+      expect(response.headers.location).toMatch(/^\/login\?next=/);
+    });
+
+    it('merkt sich das Ziel für die Weiterleitung nach der Anmeldung', async () => {
+      const response = await request(app).get('/einstellungen');
+      expect(response.headers.location).toBe('/login?next=%2Feinstellungen');
+    });
+
+    it.each([
+      ['/api/status'],
+      ['/api/report'],
+      ['/api/settings'],
+      ['/api/users'],
+    ])('antwortet auf %s mit 401 statt einer Weiterleitung', async (url) => {
+      const response = await request(app).get(url);
+      expect(response.status).toBe(401);
+    });
+
+    it('liefert die Login-Seite aus', async () => {
+      const response = await request(app).get('/login').expect(200);
+      expect(response.text).toContain('Benutzername');
+      expect(response.text).toContain('name="password"');
+    });
+
+    it('gibt statische Dateien frei - die Login-Seite braucht ihr Stylesheet', async () => {
+      await request(app).get('/static/css/material.css').expect(200);
+    });
   });
 
-  it('weist falsche Zugangsdaten ab', async () => {
-    await request(app).get('/').auth('testuser', 'falsch').expect(401);
-    await request(app).get('/').auth('hacker', 'testpassword').expect(401);
+  describe('Anmeldung', () => {
+    it('setzt bei korrekten Daten ein httpOnly-Sitzungscookie', async () => {
+      const response = await request(app)
+        .post('/login').type('form')
+        .send({ username: CREDENTIALS.user, password: CREDENTIALS.pass });
+
+      expect(response.status).toBe(302);
+      expect(response.headers.location).toBe('/');
+
+      const cookie = response.headers['set-cookie'].join(';');
+      expect(cookie).toContain('wb_session=');
+      expect(cookie).toContain('HttpOnly');
+      expect(cookie).toContain('SameSite=Lax');
+    });
+
+    it('weist ein falsches Passwort ab, ohne Cookie zu setzen', async () => {
+      const response = await request(app)
+        .post('/login').type('form')
+        .send({ username: CREDENTIALS.user, password: 'falsch' });
+
+      expect(response.status).toBe(401);
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(response.text).toContain('Benutzername oder Passwort ist falsch.');
+    });
+
+    it('nennt bei unbekanntem Konto dieselbe Meldung wie bei falschem Passwort', async () => {
+      // Sonst liesse sich abfragen, welche Benutzernamen existieren.
+      const response = await request(app)
+        .post('/login').type('form')
+        .send({ username: 'gibtesnicht', password: 'irgendwas' });
+
+      expect(response.status).toBe(401);
+      expect(response.text).toContain('Benutzername oder Passwort ist falsch.');
+    });
+
+    it('sperrt das Konto nach zu vielen Fehlversuchen', async () => {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await request(app).post('/login').type('form')
+          .send({ username: CREDENTIALS.user, password: 'falsch' });
+      }
+
+      // Auch mit dem RICHTIGEN Passwort bleibt das Konto jetzt gesperrt.
+      const response = await request(app).post('/login').type('form')
+        .send({ username: CREDENTIALS.user, password: CREDENTIALS.pass });
+
+      expect(response.status).toBe(401);
+      expect(response.text).toContain('vorübergehend gesperrt');
+    });
+
+    it('lässt ein deaktiviertes Konto nicht herein', async () => {
+      const viewer = await createUser({ username: 'inaktiv', password: 'test-passwort-1234', role: 'viewer' });
+      users.update(viewer.id, { isActive: false });
+
+      const response = await request(app).post('/login').type('form')
+        .send({ username: 'inaktiv', password: 'test-passwort-1234' });
+
+      expect(response.status).toBe(401);
+      expect(response.text).toContain('deaktiviert');
+    });
+
+    it('folgt nur pfadrelativen Weiterleitungen (kein Open Redirect)', async () => {
+      const response = await request(app).post('/login').type('form')
+        .send({ username: CREDENTIALS.user, password: CREDENTIALS.pass, next: 'https://boese.example/' });
+
+      expect(response.headers.location).toBe('/');
+    });
   });
 
-  it('lässt korrekte Zugangsdaten durch', async () => {
-    await request(app).get('/').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+  describe('Abmeldung', () => {
+    it('beendet die Sitzung und löscht das Cookie', async () => {
+      const response = await admin.agent.post('/logout')
+        .set('X-CSRF-Token', admin.csrfToken)
+        .expect(302);
+
+      expect(response.headers['set-cookie'].join(';')).toMatch(/wb_session=;/);
+      // Der Agent hält das gelöschte Cookie - der nächste Aufruf muss umleiten.
+      await admin.agent.get('/').expect(302);
+    });
   });
 
-  it('startet nicht, wenn nirgends ein Passwort konfiguriert ist', () => {
-    // Die Option fällt bewusst auf config.auth.password zurück - für diesen
-    // Test muss deshalb auch die Konfiguration leer sein.
-    const original = config.auth.password;
-    config.auth.password = undefined;
-    try {
-      expect(() => createApp()).toThrow(/AUTH_PASSWORD/);
-    } finally {
-      config.auth.password = original;
-    }
+  describe('Basic-Auth für maschinelle Zugriffe', () => {
+    it('erlaubt den Health-Endpunkt ohne Sitzung', async () => {
+      const response = await request(app)
+        .get('/api/health')
+        .set('Authorization', basic())
+        .expect(200);
+
+      expect(response.body.status).toBe('ok');
+    });
+
+    it('weist falsche Zugangsdaten ab', async () => {
+      await request(app).get('/api/health')
+        .set('Authorization', basic('testadmin', 'falsch'))
+        .expect(401);
+    });
+
+    it('gilt nicht für HTML-Seiten', async () => {
+      // Dort führt Basic-Auth zwar zur Anmeldung, die Seite wird aber
+      // regulär gerendert - kein Browser-Dialog, kein Sonderweg.
+      const response = await request(app).get('/').set('Authorization', basic());
+      expect(response.status).toBe(200);
+    });
+  });
+
+  describe('Rollen', () => {
+    let viewer;
+
+    beforeEach(async () => {
+      await createUser({ username: 'betrachter', password: 'test-passwort-1234', role: 'viewer' });
+      viewer = await login(request, app, { username: 'betrachter', password: 'test-passwort-1234' });
+    });
+
+    it('lässt Betrachter auf das Dashboard', async () => {
+      await viewer.agent.get('/').expect(200);
+    });
+
+    it('lässt Betrachter die Abrechnungsvorschau lesen', async () => {
+      await viewer.agent.get('/api/report?year=2026&month=3').expect(200);
+    });
+
+    it.each([
+      ['/einstellungen'],
+      ['/benutzer'],
+    ])('sperrt Betrachter aus %s aus', async (url) => {
+      await viewer.agent.get(url).expect(403);
+    });
+
+    it('verbietet Betrachtern das Ändern der Einstellungen', async () => {
+      const response = await viewer.agent
+        .put('/api/settings')
+        .set('X-CSRF-Token', viewer.csrfToken)
+        .send({ billing: { pricePerKwh: 0.99 } });
+
+      expect(response.status).toBe(403);
+      expect(settingsStore.load({ force: true }).billing.pricePerKwh).toBe(0.3);
+    });
+
+    it('verbietet Betrachtern den manuellen Report-Lauf', async () => {
+      await viewer.agent
+        .post('/api/report/run')
+        .set('X-CSRF-Token', viewer.csrfToken)
+        .send({ year: 2026, month: 3, sendMail: false })
+        .expect(403);
+    });
+
+    it('verbirgt Verwaltungs-Links in der Navigation', async () => {
+      const response = await viewer.agent.get('/').expect(200);
+      expect(response.text).not.toContain('href="/einstellungen"');
+      expect(response.text).not.toContain('href="/benutzer"');
+    });
+  });
+
+  describe('CSRF-Schutz', () => {
+    it('weist schreibende Anfragen ohne Token ab', async () => {
+      const response = await admin.agent
+        .put('/api/settings')
+        .send({ billing: { pricePerKwh: 0.99 } });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('csrf_failed');
+    });
+
+    it('weist ein falsches Token ab', async () => {
+      await admin.agent
+        .put('/api/settings')
+        .set('X-CSRF-Token', 'komplett-falsches-token')
+        .send({ billing: { pricePerKwh: 0.99 } })
+        .expect(403);
+    });
+
+    it('lässt lesende Anfragen ohne Token durch', async () => {
+      await admin.agent.get('/api/settings').expect(200);
+    });
+
+    it('greift nicht bei Basic-Auth - ohne Cookie gibt es kein CSRF-Risiko', async () => {
+      await request(app)
+        .put('/api/settings')
+        .set('Authorization', basic())
+        .send({ billing: { companyName: 'Per Skript' } })
+        .expect(200);
+
+      expect(settingsStore.load({ force: true }).billing.companyName).toBe('Per Skript');
+    });
+  });
+
+  describe('Erzwungener Passwortwechsel', () => {
+    it('leitet auf die Passwortseite um und sperrt den Rest', async () => {
+      await createUser({
+        username: 'neuling', password: 'test-passwort-1234',
+        role: 'admin', mustChangePassword: true,
+      });
+      const fresh = await login(request, app, {
+        username: 'neuling', password: 'test-passwort-1234', tokenFrom: '/passwort',
+      });
+
+      const dashboard = await fresh.agent.get('/');
+      expect(dashboard.status).toBe(302);
+      expect(dashboard.headers.location).toBe('/passwort');
+
+      // Die Passwortseite selbst bleibt erreichbar.
+      await fresh.agent.get('/passwort').expect(200);
+    });
   });
 });
 
 describe('Sicherheits-Header', () => {
   it('setzt die Helmet-Header', async () => {
-    const response = await request(app).get('/').auth(CREDENTIALS.user, CREDENTIALS.pass);
+    const response = await admin.agent.get('/');
 
     expect(response.headers['content-security-policy']).toBeDefined();
     expect(response.headers['x-content-type-options']).toBe('nosniff');
@@ -117,23 +338,24 @@ describe('Sicherheits-Header', () => {
     expect(response.headers['x-powered-by']).toBeUndefined();
   });
 
-  it('erlaubt in der CSP nur den Tailwind-CDN und eigene Skripte', async () => {
-    const response = await request(app).get('/').auth(CREDENTIALS.user, CREDENTIALS.pass);
+  it('erlaubt in der CSP keine fremden Skript-Hosts', async () => {
+    const response = await admin.agent.get('/');
     const csp = response.headers['content-security-policy'];
 
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain('https://cdn.tailwindcss.com');
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
     // Inline-Skripte nur über Nonce, nicht pauschal.
     expect(csp).toMatch(/script-src[^;]*'nonce-/);
     expect(csp).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+    // Das Material-Stylesheet liegt lokal - kein CDN mehr im script-src.
+    expect(csp).not.toContain('cdn.tailwindcss.com');
   });
 });
 
 describe('WebUI', () => {
   it('rendert das Dashboard', async () => {
-    const response = await request(app).get('/').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/').expect(200);
 
     expect(response.text).toContain('Live-Übersicht');
     expect(response.text).toContain('Aktuelle Ladeleistung');
@@ -141,7 +363,7 @@ describe('WebUI', () => {
   });
 
   it('rendert die Einstellungen mit den gespeicherten Werten', async () => {
-    const response = await request(app).get('/einstellungen').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/einstellungen').expect(200);
 
     expect(response.text).toContain('RFID-Zuordnung');
     expect(response.text).toContain('buchhaltung@firma.de');
@@ -149,19 +371,19 @@ describe('WebUI', () => {
   });
 
   it('liefert eine 404-Seite für unbekannte Pfade', async () => {
-    const response = await request(app).get('/gibt-es-nicht').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(404);
+    const response = await admin.agent.get('/gibt-es-nicht').expect(404);
     expect(response.text).toContain('Diese Seite existiert nicht.');
   });
 
   it('antwortet bei unbekannten API-Pfaden mit JSON', async () => {
-    const response = await request(app).get('/api/gibt-es-nicht').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(404);
+    const response = await admin.agent.get('/api/gibt-es-nicht').expect(404);
     expect(response.body.error).toBe('not_found');
   });
 });
 
 describe('GET /api/status', () => {
   it('liefert den normalisierten Zustand', async () => {
-    const response = await request(app).get('/api/status').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/api/status').expect(200);
 
     expect(response.body).toMatchObject({
       status: 'charging', statusLabel: 'Lädt', powerKw: 11.04, rfid: '04a1b2c3',
@@ -169,23 +391,24 @@ describe('GET /api/status', () => {
   });
 
   it('löst den RFID-Namen aus dem Mapping auf', async () => {
-    const response = await request(app).get('/api/status').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/api/status').expect(200);
     expect(response.body.rfidName).toBe('Max Mustermann');
   });
 
   it('meldet einen Wallbox-Ausfall als 500 mit Meldung', async () => {
     build({ getLiveStatus: jest.fn(async () => { throw new Error('ECONNREFUSED'); }) });
+    // build() erzeugt eine neue App-Instanz; der Agent muss darauf zeigen.
+    const session = await login(request, app);
 
-    const response = await request(app).get('/api/status').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(500);
+    const response = await session.agent.get('/api/status').expect(500);
     expect(response.body.error).toBe('internal_error');
   });
 });
 
 describe('GET /api/report', () => {
   it('liefert den Report für den angefragten Monat', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .get('/api/report?year=2026&month=3')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
       .expect(200);
 
     expect(response.body.period.key).toBe('2026-03');
@@ -194,7 +417,7 @@ describe('GET /api/report', () => {
   });
 
   it('nutzt ohne Parameter den Vormonat', async () => {
-    const response = await request(app).get('/api/report').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/api/report').expect(200);
     expect(response.body.period.key).toMatch(/^\d{4}-\d{2}$/);
   });
 
@@ -204,9 +427,8 @@ describe('GET /api/report', () => {
     ['?year=2026&month=0', 'Monat zu klein'],
     ['?year=abc&month=3', 'Jahr keine Zahl'],
   ])('weist ungültige Parameter zurück: %s (%s)', async (query) => {
-    const response = await request(app)
+    const response = await admin.agent
       .get(`/api/report${query}`)
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
       .expect(400);
 
     expect(response.body.error).toBe('bad_request');
@@ -215,9 +437,9 @@ describe('GET /api/report', () => {
 
 describe('POST /api/report/run', () => {
   it('erzeugt Dateien ohne Versand', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .post('/api/report/run')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({ year: 2026, month: 3, sendMail: false })
       .expect(200);
 
@@ -228,9 +450,9 @@ describe('POST /api/report/run', () => {
   });
 
   it('validiert den Zeitraum auch hier', async () => {
-    await request(app)
+    await admin.agent
       .post('/api/report/run')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({ year: 2026, month: 99, sendMail: false })
       .expect(400);
   });
@@ -238,14 +460,14 @@ describe('POST /api/report/run', () => {
 
 describe('Dateien', () => {
   beforeEach(async () => {
-    await request(app)
+    await admin.agent
       .post('/api/report/run')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({ year: 2026, month: 3, sendMail: false });
   });
 
   it('listet die erzeugten Dateien', async () => {
-    const response = await request(app).get('/api/report/files').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/api/report/files').expect(200);
 
     const names = response.body.files.map((file) => file.fileName);
     expect(names).toContain('ladestrom_2026-03_abrechnung.pdf');
@@ -253,9 +475,8 @@ describe('Dateien', () => {
   });
 
   it('liefert eine Datei zum Download aus', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .get('/api/report/files/ladestrom_2026-03_detail.csv')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
       .expect(200);
 
     expect(response.headers['content-disposition']).toContain('ladestrom_2026-03_detail.csv');
@@ -267,32 +488,30 @@ describe('Dateien', () => {
     ['settings.json', 'falsche Endung'],
     ['report.pdf.sh', 'untergeschobene Endung'],
   ])('blockt Path-Traversal: %s (%s)', async (name) => {
-    const response = await request(app)
-      .get(`/api/report/files/${name}`)
-      .auth(CREDENTIALS.user, CREDENTIALS.pass);
+    const response = await admin.agent
+      .get(`/api/report/files/${name}`);
 
     expect(response.status).toBeGreaterThanOrEqual(400);
     expect(response.text).not.toContain('root:');
   });
 
   it('meldet 404 für eine nicht vorhandene Datei', async () => {
-    await request(app)
+    await admin.agent
       .get('/api/report/files/ladestrom_1999-01_abrechnung.pdf')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
       .expect(404);
   });
 });
 
 describe('Einstellungen über die API', () => {
   it('liefert die aktuellen Einstellungen', async () => {
-    const response = await request(app).get('/api/settings').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/api/settings').expect(200);
 
     expect(response.body.billing.pricePerKwh).toBe(0.3);
     expect(response.body.mail.to).toEqual(['buchhaltung@firma.de']);
   });
 
   it('gibt niemals Secrets preis', async () => {
-    const response = await request(app).get('/api/settings').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/api/settings').expect(200);
     const serialized = JSON.stringify(response.body).toLowerCase();
 
     expect(serialized).not.toContain('testpassword');
@@ -301,9 +520,9 @@ describe('Einstellungen über die API', () => {
   });
 
   it('speichert gültige Aenderungen', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .put('/api/settings')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({
         billing: { pricePerKwh: 0.42, companyName: 'Neue GmbH' },
         mail: { to: ['neu@firma.de', 'zweite@firma.de'] },
@@ -317,9 +536,9 @@ describe('Einstellungen über die API', () => {
   });
 
   it('nimmt Empfänger auch als kommaseparierten String an', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .put('/api/settings')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({ mail: { to: 'a@firma.de, b@firma.de' } })
       .expect(200);
 
@@ -327,21 +546,21 @@ describe('Einstellungen über die API', () => {
   });
 
   it('speichert RFID-Zuordnungen', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .put('/api/settings')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({ rfidMappings: [{ rfid: 'DEADBEEF', name: 'Neuer Fahrer', plate: 'B-EV 9', billable: false }] })
       .expect(200);
 
     expect(response.body.settings.rfidMappings).toEqual([
-      { rfid: 'DEADBEEF', name: 'Neuer Fahrer', plate: 'B-EV 9', billable: false },
+      { rfid: 'deadbeef', rfidRaw: 'DEADBEEF', name: 'Neuer Fahrer', plate: 'B-EV 9', billable: false },
     ]);
   });
 
   it('verwirft RFID-Einträge ohne ID', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .put('/api/settings')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({ rfidMappings: [{ rfid: '', name: 'Leer' }, { rfid: 'OK01', name: 'Gut' }] })
       .expect(200);
 
@@ -356,9 +575,9 @@ describe('Einstellungen über die API', () => {
     [{ mail: { to: ['keine-email'] } }, 'ungültige Adresse'],
     [{ wallbox: { baseUrl: 'ftp://wallbox' } }, 'falsches Protokoll'],
   ])('weist ungültige Eingaben zurück (%#: %s)', async (payload) => {
-    const response = await request(app)
+    const response = await admin.agent
       .put('/api/settings')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send(payload)
       .expect(400);
 
@@ -366,9 +585,9 @@ describe('Einstellungen über die API', () => {
   });
 
   it('ignoriert nicht gewhitelistete Felder', async () => {
-    const response = await request(app)
+    const response = await admin.agent
       .put('/api/settings')
-      .auth(CREDENTIALS.user, CREDENTIALS.pass)
+      .set('X-CSRF-Token', admin.csrfToken)
       .send({
         smtpPassword: 'geheim',
         auth: { password: 'übernommen' },
@@ -385,7 +604,7 @@ describe('Einstellungen über die API', () => {
 
 describe('GET /api/health', () => {
   it('meldet 200, wenn die Wallbox erreichbar ist', async () => {
-    const response = await request(app).get('/api/health').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(200);
+    const response = await admin.agent.get('/api/health').expect(200);
 
     expect(response.body.status).toBe('ok');
     expect(response.body.wallbox.reachable).toBe(true);
@@ -394,8 +613,9 @@ describe('GET /api/health', () => {
 
   it('meldet 503, wenn die Wallbox nicht antwortet', async () => {
     build({ ping: jest.fn(async () => ({ reachable: false, error: 'ETIMEDOUT' })) });
+    const session = await login(request, app);
 
-    const response = await request(app).get('/api/health').auth(CREDENTIALS.user, CREDENTIALS.pass).expect(503);
+    const response = await session.agent.get('/api/health').expect(503);
     expect(response.body.status).toBe('degraded');
   });
 });

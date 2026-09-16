@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="dark light">
+  <title><%= title %> &middot; Wallbox-Abrechnung</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>">
+  <link rel="stylesheet" href="/static/css/material.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap">
+  <script src="/static/js/material.js" nonce="<%= cspNonce %>" defer></script>
+</head>
+<body>
+
+<main style="min-height:100vh;display:grid;place-items:center;padding:24px">
+  <div style="width:min(420px,100%)">
+
+    <div style="text-align:center;margin-bottom:28px">
+      <span class="md-topbar__logo" style="width:56px;height:56px;margin:0 auto 14px">
+        <%- include('partials/icon', { name: 'ev', size: 30 }) %>
+      </span>
+      <h1 class="md-headline-s" style="margin:0">Ladestrom-Abrechnung</h1>
+      <p class="md-body-m md-on-surface-variant" style="margin:6px 0 0">
+        Bitte melden Sie sich an, um fortzufahren.
+      </p>
+    </div>
+
+    <div class="md-card md-card--elevated">
+
+      <% if (error) { %>
+        <div class="md-banner md-banner--error" style="margin-bottom:20px" role="alert">
+          <%- include('partials/icon', { name: 'error' }) %>
+          <span><%= error %></span>
+        </div>
+      <% } %>
+
+      <% if (firstRun && !error) { %>
+        <div class="md-banner md-banner--info" style="margin-bottom:20px">
+          <%- include('partials/icon', { name: 'info' }) %>
+          <span>Erste Anmeldung: Zugangsdaten sind die Werte aus
+            <span class="md-mono">AUTH_USER</span> und <span class="md-mono">AUTH_PASSWORD</span>.</span>
+        </div>
+      <% } %>
+
+      <form method="post" action="/login" class="md-stack" style="gap:20px">
+        <input type="hidden" name="next" value="<%= next %>">
+
+        <label class="md-field">
+          <input class="md-field__input" type="text" name="username" id="username"
+                 value="<%= username %>" placeholder=" " required autofocus
+                 autocomplete="username" autocapitalize="none" spellcheck="false">
+          <span class="md-field__label">Benutzername</span>
+        </label>
+
+        <label class="md-field">
+          <input class="md-field__input" type="password" name="password" id="password"
+                 placeholder=" " required autocomplete="current-password">
+          <span class="md-field__label">Passwort</span>
+        </label>
+
+        <label class="md-check">
+          <input type="checkbox" name="remember">
+          <span class="md-body-m">Angemeldet bleiben</span>
+        </label>
+
+        <button type="submit" class="md-btn md-btn--filled" style="width:100%">Anmelden</button>
+      </form>
+    </div>
+
+    <p class="md-body-s md-on-surface-variant" style="text-align:center;margin-top:20px">
+      Mennekes Wallbox Billing
+    </p>
+  </div>
+</main>
+
+</body>
+</html>

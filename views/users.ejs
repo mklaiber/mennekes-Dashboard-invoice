@@ -1,0 +1,222 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="md-content">
+
+  <div class="md-row" style="margin-bottom:24px">
+    <div>
+      <h1 class="md-headline-m" style="margin:0">Benutzer</h1>
+      <p class="md-body-m md-on-surface-variant" style="margin:4px 0 0">
+        Konten, Rollen und Zugriff auf die Oberfläche.
+      </p>
+    </div>
+    <span class="md-spacer"></span>
+    <button type="button" id="add-user" class="md-btn md-btn--filled">
+      <%- include('partials/icon', { name: 'add', size: 18 }) %> Benutzer anlegen
+    </button>
+  </div>
+
+  <div class="md-banner md-banner--info" style="margin-bottom:24px">
+    <%- include('partials/icon', { name: 'shield' }) %>
+    <span class="md-body-s">
+      <strong>Administrator</strong> darf alles, einschließlich Einstellungen und Benutzerverwaltung.
+      <strong>Betrachter</strong> sieht nur das Dashboard und die Abrechnungsvorschau –
+      keine Einstellungen, keinen manuellen Versand, keine Empfängeradressen.
+    </span>
+  </div>
+
+  <section class="md-card md-card--flush">
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <caption class="sr-only">Liste aller Benutzerkonten</caption>
+        <thead>
+          <tr>
+            <th scope="col">Benutzer</th>
+            <th scope="col">Rolle</th>
+            <th scope="col">Status</th>
+            <th scope="col">Letzte Anmeldung</th>
+            <th scope="col"><span class="sr-only">Aktionen</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% users.forEach(function (user) { %>
+            <tr data-user-id="<%= user.id %>">
+              <td>
+                <div class="md-label-l"><%= user.displayName || user.username %></div>
+                <div class="md-body-s md-on-surface-variant">
+                  <%= user.username %><%= user.email ? ' · ' + user.email : '' %>
+                  <% if (currentUser.id === user.id) { %> · <em>das sind Sie</em><% } %>
+                </div>
+              </td>
+              <td>
+                <span class="md-chip <%= user.role === 'admin' ? 'md-chip--primary' : '' %> md-chip--small">
+                  <%- include('partials/icon', { name: user.role === 'admin' ? 'shield' : 'person', size: 14 }) %>
+                  <%= user.role === 'admin' ? 'Administrator' : 'Betrachter' %>
+                </span>
+              </td>
+              <td>
+                <% if (!user.isActive) { %>
+                  <span class="md-chip md-chip--small">deaktiviert</span>
+                <% } else if (user.isLocked) { %>
+                  <span class="md-chip md-chip--error md-chip--small">gesperrt</span>
+                <% } else if (user.mustChangePassword) { %>
+                  <span class="md-chip md-chip--warning md-chip--small">Passwortwechsel offen</span>
+                <% } else { %>
+                  <span class="md-chip md-chip--primary md-chip--small">aktiv</span>
+                <% } %>
+              </td>
+              <td class="md-body-s md-on-surface-variant">
+                <%= user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('de-DE') : 'noch nie' %>
+              </td>
+              <td style="text-align:right;white-space:nowrap">
+                <button type="button" class="md-icon-btn" data-action="edit" data-id="<%= user.id %>"
+                        title="Bearbeiten" aria-label="Benutzer bearbeiten">
+                  <%- include('partials/icon', { name: 'edit', size: 18 }) %>
+                </button>
+                <button type="button" class="md-icon-btn" data-action="password" data-id="<%= user.id %>"
+                        title="Passwort zurücksetzen" aria-label="Passwort zurücksetzen">
+                  <%- include('partials/icon', { name: 'key', size: 18 }) %>
+                </button>
+                <% if (currentUser.id !== user.id) { %>
+                  <button type="button" class="md-icon-btn" data-action="delete" data-id="<%= user.id %>"
+                          data-name="<%= user.username %>" title="Löschen" aria-label="Benutzer löschen"
+                          style="color:var(--md-error)">
+                    <%- include('partials/icon', { name: 'delete', size: 18 }) %>
+                  </button>
+                <% } %>
+              </td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== Protokoll ===================== -->
+  <section style="margin-top:32px">
+    <h2 class="md-title-l" style="margin:0 0 4px">
+      <%- include('partials/icon', { name: 'history', size: 20 }) %> Protokoll
+    </h2>
+    <p class="md-body-m md-on-surface-variant" style="margin:0 0 16px">
+      Anmeldungen, Kontoänderungen und Abrechnungsläufe – die jüngsten 40 Einträge.
+    </p>
+
+    <div class="md-card md-card--flush">
+      <div class="md-table-wrap">
+        <table class="md-table">
+          <thead>
+            <tr>
+              <th scope="col">Zeitpunkt</th>
+              <th scope="col">Benutzer</th>
+              <th scope="col">Aktion</th>
+              <th scope="col">Detail</th>
+              <th scope="col">IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (auditEntries.length === 0) { %>
+              <tr><td colspan="5" class="md-on-surface-variant" style="text-align:center;padding:32px">
+                Noch keine Einträge.
+              </td></tr>
+            <% } %>
+            <% auditEntries.forEach(function (entry) { %>
+              <tr>
+                <td class="md-body-s md-on-surface-variant" style="white-space:nowrap">
+                  <%= new Date(entry.at).toLocaleString('de-DE') %>
+                </td>
+                <td class="md-body-s"><%= entry.username || '–' %></td>
+                <td>
+                  <span class="md-chip md-chip--small <%= entry.action === 'login.failed' ? 'md-chip--warning' : '' %>">
+                    <%= entry.action %>
+                  </span>
+                </td>
+                <td class="md-body-s md-on-surface-variant"><%= entry.detail || '–' %></td>
+                <td class="md-body-s md-on-surface-variant md-mono"><%= entry.ip || '–' %></td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===================== Dialog: anlegen / bearbeiten ===================== -->
+<dialog id="user-dialog" class="md-dialog">
+  <form class="md-dialog__panel" id="user-form" method="dialog">
+    <h2 class="md-dialog__title" id="user-dialog-title">Benutzer anlegen</h2>
+
+    <div id="user-dialog-error" class="md-banner md-banner--error hidden" style="margin-bottom:20px"></div>
+
+    <div class="md-stack" style="gap:20px">
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="user-username" placeholder=" " required
+               autocapitalize="none" spellcheck="false">
+        <span class="md-field__label">Benutzername</span>
+        <span class="md-field__hint">Buchstaben, Ziffern und . _ - @ &middot; mindestens 3 Zeichen</span>
+      </label>
+
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="user-displayName" placeholder=" ">
+        <span class="md-field__label">Anzeigename (optional)</span>
+      </label>
+
+      <label class="md-field">
+        <input class="md-field__input" type="email" id="user-email" placeholder=" ">
+        <span class="md-field__label">E-Mail (optional)</span>
+      </label>
+
+      <label class="md-field">
+        <select id="user-role" class="md-field__select">
+          <option value="viewer">Betrachter</option>
+          <option value="admin">Administrator</option>
+        </select>
+        <span class="md-field__label">Rolle</span>
+        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
+      </label>
+
+      <label class="md-switch" id="user-active-row">
+        <input type="checkbox" id="user-isActive" checked>
+        <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+        <span class="md-body-m">Konto aktiv</span>
+      </label>
+
+      <label class="md-field" id="user-password-row">
+        <input class="md-field__input" type="text" id="user-password" placeholder=" "
+               autocomplete="new-password">
+        <span class="md-field__label">Startpasswort (optional)</span>
+        <span class="md-field__hint">
+          Leer lassen, um ein sicheres Passwort erzeugen zu lassen – es wird einmalig angezeigt.
+          Mindestens <%= minLength %> Zeichen.
+        </span>
+      </label>
+    </div>
+
+    <div class="md-dialog__actions">
+      <button type="button" class="md-btn md-btn--text" data-confirm-cancel>Abbrechen</button>
+      <button type="button" class="md-btn md-btn--filled" id="user-save">Speichern</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ===================== Dialog: erzeugtes Passwort ===================== -->
+<dialog id="password-dialog" class="md-dialog">
+  <div class="md-dialog__panel">
+    <h2 class="md-dialog__title">Passwort erzeugt</h2>
+    <p class="md-body-m md-on-surface-variant" style="margin:0 0 16px">
+      Dieses Passwort wird <strong>nur jetzt</strong> angezeigt. Bitte sicher übergeben –
+      beim ersten Anmelden muss es geändert werden.
+    </p>
+    <div class="md-mono" id="generated-password"
+         style="padding:16px;border-radius:var(--md-shape-m);background:var(--md-surface-highest);
+                font-size:16px;word-break:break-all;user-select:all"></div>
+    <div class="md-dialog__actions">
+      <button type="button" class="md-btn md-btn--filled" data-confirm-cancel>Schließen</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="/static/js/users.js" nonce="<%= cspNonce %>" defer></script>
+
+<%- include('partials/foot') %>

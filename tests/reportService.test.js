@@ -19,7 +19,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { buildReportForMonth, generateArtifacts, runMonthlyReport, listGeneratedFiles } = require('../src/services/reportService');
-const settingsStore = require('../src/config/settings');
+const settingsStore = require('../src/repositories/settingsRepository');
+const { resetDatabase } = require('./helpers/testDb');
 const pdfService = require('../src/services/pdfService');
 const fixtures = require('./fixtures/wallbox');
 const MennekesClient = require('../src/services/mennekesClient');
@@ -43,6 +44,7 @@ function fakeTransporter() {
 let outputDir;
 
 beforeEach(() => {
+  resetDatabase();
   jest.clearAllMocks();
   pdfService._resetCaches();
   settingsStore.reset();

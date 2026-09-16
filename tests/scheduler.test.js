@@ -1,9 +1,11 @@
 'use strict';
 
 const { ReportScheduler, shouldRunNow, periodForRun } = require('../src/jobs/scheduler');
-const settingsStore = require('../src/config/settings');
+const settingsStore = require('../src/repositories/settingsRepository');
+const { resetDatabase } = require('./helpers/testDb');
 
 beforeEach(() => {
+  resetDatabase();
   settingsStore.reset();
   settingsStore.save({
     billing: { timezone: 'Europe/Berlin' },

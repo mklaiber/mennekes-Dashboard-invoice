@@ -67,16 +67,40 @@ const config = {
     trustProxy: bool('TRUST_PROXY', false),
     // Verzeichnis für generierte PDFs/CSVs. Im Container als Volume gemountet.
     outputDir: path.resolve(str('OUTPUT_DIR', path.join(process.cwd(), 'data', 'reports'))),
-    // Persistenz der über die WebUI pflegbaren Einstellungen.
+    // SQLite-Datei: Nutzer, Sitzungen, Einstellungen, RFID-Zuordnung, Protokoll.
+    // ':memory:' ist ein Sonderwert von SQLite und darf NICHT aufgelöst werden -
+    // path.resolve() machte daraus sonst eine echte Datei namens ":memory:".
+    databaseFile: (() => {
+      const value = str('DATABASE_FILE', path.join(process.cwd(), 'data', 'wallbox.sqlite'));
+      return value === ':memory:' ? value : path.resolve(value);
+    })(),
+    // Alt-Bestand aus der Dateiversion: wird beim ersten Start einmalig
+    // in die Datenbank übernommen und danach nicht mehr gelesen.
     settingsFile: path.resolve(str('SETTINGS_FILE', path.join(process.cwd(), 'data', 'settings.json'))),
     logLevel: str('LOG_LEVEL', NODE_ENV === 'test' ? 'silent' : 'info'),
   },
 
   auth: {
+    // Start-Administrator. Wird nur angelegt, solange die Nutzertabelle leer ist -
+    // danach ist die Datenbank fuehrend und eine Aenderung hier bleibt wirkungslos.
     user: str('AUTH_USER', 'admin'),
     // Kein Default-Passwort: Fehlt das Secret, verweigert assertProductionSecrets() den Start.
     password: raw('AUTH_PASSWORD'),
     realm: str('AUTH_REALM', 'Mennekes Wallbox Abrechnung'),
+    // Lebensdauer einer angemeldeten Sitzung.
+    sessionTtlHours: int('SESSION_TTL_HOURS', 12),
+    // "Angemeldet bleiben" verlaengert die Sitzung auf diesen Wert.
+    rememberTtlDays: int('SESSION_REMEMBER_DAYS', 30),
+    cookieName: str('SESSION_COOKIE_NAME', 'wb_session'),
+    // Secure-Flag: nur ueber HTTPS ausliefern. Hinter reinem HTTP im LAN
+    // muss das abschaltbar sein, sonst kommt das Cookie nie an.
+    cookieSecure: bool('SESSION_COOKIE_SECURE', NODE_ENV === 'production'),
+    // Brute-Force-Bremse: nach so vielen Fehlversuchen wird das Konto gesperrt.
+    maxFailedAttempts: int('AUTH_MAX_FAILED_ATTEMPTS', 8),
+    lockMinutes: int('AUTH_LOCK_MINUTES', 15),
+    minPasswordLength: int('AUTH_MIN_PASSWORD_LENGTH', 12),
+    // Basic-Auth fuer maschinelle Zugriffe (Healthcheck, Skripte) zulassen.
+    allowBasicAuthForApi: bool('AUTH_ALLOW_BASIC_API', true),
   },
 
   mennekes: {

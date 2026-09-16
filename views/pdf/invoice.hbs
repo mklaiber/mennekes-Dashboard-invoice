@@ -9,9 +9,11 @@
      Puppeteer rendert offline im Container - ein nicht ladbarer
      Webfont würde das Layout unvorhersehbar verschieben.
      ============================================================ */
+  /* Puppeteer setzt die Ränder über seine margin-Option; @page sorgt dafür,
+     dass dasselbe HTML auch beim Druck direkt aus dem Browser gleich aussieht. */
   @page {
     size: A4;
-    margin: 14mm 13mm 18mm 13mm;
+    margin: {{margins.top}}mm {{margins.right}}mm {{margins.bottom}}mm {{margins.left}}mm;
   }
 
   :root {
@@ -40,7 +42,10 @@
   }
 
   /* ---------- Kopfbereich ---------- */
+  /* Der Kopfbereich gehört zusammen - ein Umbruch mittendrin sieht kaputt aus. */
   .masthead {
+    page-break-inside: avoid;
+    break-inside: avoid;
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -100,6 +105,8 @@
     display: flex;
     gap: 8mm;
     margin-top: 6mm;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .party {
     flex: 1;
@@ -124,6 +131,8 @@
     display: flex;
     gap: 3mm;
     margin-top: 6mm;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .kpi {
     flex: 1;
@@ -156,11 +165,15 @@
 
   /* ---------- Abschnitte ---------- */
   section { margin-top: 7mm; }
+
+  /* Eine Überschrift darf nicht als letzte Zeile einer Seite stehen. */
   h2 {
     margin: 0 0 2.5mm;
     font-size: 10pt;
     font-weight: 700;
     letter-spacing: -.01em;
+    page-break-after: avoid;
+    break-after: avoid;
   }
   h2 .count { color: var(--muted); font-weight: 500; }
 
@@ -170,8 +183,22 @@
     border-collapse: collapse;
     font-variant-numeric: tabular-nums;
   }
-  thead { display: table-header-group; }  /* Kopfzeile auf jeder Folgeseite wiederholen */
-  tr    { page-break-inside: avoid; }
+
+  /* Kopfzeile auf jeder Folgeseite wiederholen - ohne das steht auf Seite 2
+     eine Zahlenkolonne ohne Spaltenbeschriftung. */
+  thead { display: table-header-group; }
+  tfoot { display: table-row-group; }
+
+  /* Keine Zeile in der Mitte zerschneiden, und keine einzelne Zeile allein
+     auf einer neuen Seite stehen lassen. */
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  tbody {
+    orphans: 3;
+    widows: 3;
+  }
 
   th {
     text-align: left;
@@ -224,6 +251,8 @@
 
   /* ---------- Schlussrechnung ---------- */
   .settlement {
+    page-break-inside: avoid;
+    break-inside: avoid;
     margin-top: 6mm;
     margin-left: auto;
     width: 82mm;
@@ -251,6 +280,8 @@
   .settlement .total .amount { font-size: 14pt; font-weight: 700; font-variant-numeric: tabular-nums; }
 
   .notice {
+    page-break-inside: avoid;
+    break-inside: avoid;
     margin-top: 5mm;
     padding: 2.5mm 3.5mm;
     background: var(--warn-bg);
@@ -268,16 +299,33 @@
     border-radius: 2mm;
   }
 
+  /* Der Fußtext darf umbrechen. Mit `break-inside: avoid` wanderte er als
+     Ganzes auf eine neue Seite, sobald am Fuß wenige Millimeter fehlten -
+     das Ergebnis war ein fast leeres Blatt nur für drei Zeilen Kleingedrucktes. */
+  /* Hält Schlussrechnung, Hinweis und Fußtext auf derselben Seite. */
+  .closing {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
   .footnote {
-    margin-top: 8mm;
-    padding-top: 3mm;
+    margin-top: 5mm;
+    padding-top: 2.5mm;
     border-top: .8pt solid var(--line);
-    font-size: 7.5pt;
+    font-size: 7pt;
     color: var(--muted);
-    line-height: 1.5;
+    line-height: 1.4;
+    /* orphans/widows bewusst auf 1: sonst verlangt der Umbruch zwei Zeilen je
+       Seite, und ein dreizeiliger Text springt komplett auf ein neues Blatt. */
+    orphans: 1;
+    widows: 1;
   }
 
   .page-break { page-break-before: always; }
+
+  /* Der Einzelnachweis beginnt notfalls auf einer neuen Seite, statt mit zwei
+     Zeilen am Fuß der vorigen anzufangen. */
+  .detail-section { page-break-inside: auto; }
 </style>
 </head>
 <body>
@@ -387,7 +435,7 @@
   </section>
 
   {{#if report.rows.length}}
-  <section>
+  <section class="detail-section">
     <h2>Einzelnachweis <span class="count">({{report.totals.sessionCount}} Ladevorgänge)</span></h2>
     <table>
       <thead>
@@ -425,6 +473,10 @@
   </section>
   {{/if}}
 
+  <!-- Schlussblock: Abrechnung, Hinweis und Fußtext gehören zusammen und
+       wandern notfalls gemeinsam auf die nächste Seite. Einzeln umbrochen
+       landete sonst eine Zeile Kleingedrucktes allein auf einem neuen Blatt. -->
+  <div class="closing">
   <div class="settlement">
     <div class="line"><span>Abrechenbare Energie</span><span>{{num report.totals.billableEnergyKwh 3}} kWh</span></div>
     <div class="line"><span>Arbeitspreis je kWh</span><span>{{money report.pricePerKwh 4}}</span></div>
@@ -448,6 +500,7 @@
     Zeitzone: {{report.timezone}}. Alle Beträge in {{report.currency}}.
     Dokument maschinell erstellt am {{generatedAtLabel}} – ohne Unterschrift gültig.
   </div>
+  </div><!-- /.closing -->
 
 </body>
 </html>

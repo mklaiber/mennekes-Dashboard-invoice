@@ -1,19 +1,23 @@
 <!DOCTYPE html>
-<html lang="de" class="h-full">
+<html lang="de">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
   <title><%= title %></title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/material.css">
+  <script src="/static/js/material.js" nonce="<%= cspNonce %>" defer></script>
 </head>
-<body class="grid h-full place-items-center bg-slate-950 px-6 text-slate-100">
-  <main class="max-w-md text-center">
-    <p class="text-6xl font-bold text-emerald-400"><%= status %></p>
-    <h1 class="mt-3 text-xl font-semibold"><%= title %></h1>
-    <p class="mt-2 text-sm text-slate-400"><%= message %></p>
-    <a href="/" class="mt-6 inline-block rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400">
-      Zurück zum Dashboard
-    </a>
+<body>
+  <main style="min-height:100vh;display:grid;place-items:center;padding:24px;text-align:center">
+    <div style="max-width:420px">
+      <p class="md-display-s md-primary-text" style="margin:0;font-size:64px"><%= status %></p>
+      <h1 class="md-headline-s" style="margin:12px 0 0"><%= title %></h1>
+      <p class="md-body-l md-on-surface-variant" style="margin:8px 0 0"><%= message %></p>
+      <a href="/" class="md-btn md-btn--filled" style="margin-top:28px;text-decoration:none">
+        Zurück zum Dashboard
+      </a>
+    </div>
   </main>
 </body>
 </html>

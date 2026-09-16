@@ -1,176 +1,249 @@
 <%- include('partials/head') %>
 <%- include('partials/nav') %>
 
-<main class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+<main class="md-content">
 
-  <!-- Verbindungsstatus des SSE-Streams -->
-  <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+  <div class="md-row" style="margin-bottom:24px">
     <div>
-      <h1 class="text-2xl font-semibold tracking-tight">Live-Übersicht</h1>
-      <p class="mt-0.5 text-sm text-slate-400">Echtzeitdaten der Wallbox, aktualisiert alle <%= Math.round(pollIntervalMs / 1000) %> Sekunden.</p>
+      <h1 class="md-headline-m" style="margin:0">Live-Übersicht</h1>
+      <p class="md-body-m md-on-surface-variant" style="margin:4px 0 0">
+        Echtzeitdaten der Wallbox, aktualisiert alle <%= Math.round(pollIntervalMs / 1000) %> Sekunden.
+      </p>
     </div>
-    <div id="connection" class="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs">
-      <span id="connection-dot" class="h-2 w-2 rounded-full bg-slate-500" aria-hidden="true"></span>
-      <span id="connection-text" class="text-slate-400">Verbinde …</span>
-    </div>
+    <span class="md-spacer"></span>
+    <span id="connection" class="md-chip">
+      <span id="connection-dot" class="md-dot" style="color:var(--md-outline)"></span>
+      <span id="connection-text">Verbinde …</span>
+    </span>
   </div>
 
-  <!-- Fehlerbanner, nur bei Problemen sichtbar -->
-  <div id="error-banner" class="mb-5 hidden rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200" role="alert">
-    <span class="font-semibold">Wallbox nicht erreichbar:</span>
-    <span id="error-message"></span>
+  <div id="error-banner" class="md-banner md-banner--error hidden" role="alert" style="margin-bottom:24px">
+    <%- include('partials/icon', { name: 'warning' }) %>
+    <span><strong>Wallbox nicht erreichbar:</strong> <span id="error-message"></span></span>
   </div>
 
-  <!-- ===================== Hauptkachel: aktuelle Ladeleistung ===================== -->
-  <section class="grid gap-4 lg:grid-cols-3">
+  <!-- ===================== Live-Kacheln ===================== -->
+  <section class="md-grid md-cols-2-1" style="margin-bottom:24px">
 
-    <div class="lg:col-span-2 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 to-slate-900/40 p-6">
-      <div class="flex items-start justify-between gap-4">
+    <div class="md-card md-card--elevated">
+      <div class="md-card__header">
         <div>
-          <p class="text-xs font-medium uppercase tracking-widest text-slate-400">Aktuelle Ladeleistung</p>
-          <div class="mt-2 flex items-baseline gap-2">
-            <span id="power-value" class="text-6xl font-bold tabular-nums tracking-tight text-white">–</span>
-            <span class="text-2xl font-semibold text-slate-400">kW</span>
+          <div class="md-metric__label">Aktuelle Ladeleistung</div>
+          <div style="display:flex;align-items:baseline;gap:6px;margin-top:8px">
+            <span id="power-value" class="md-numeric" style="font-size:56px;line-height:1;font-weight:400">–</span>
+            <span class="md-title-l md-on-surface-variant">kW</span>
           </div>
-          <p id="power-detail" class="mt-2 text-sm text-slate-400">Warte auf Daten …</p>
+          <p id="power-detail" class="md-body-m md-on-surface-variant" style="margin:10px 0 0">
+            Warte auf Daten …
+          </p>
         </div>
 
-        <!-- Statusanzeige mit Puls-Animation während des Ladens -->
-        <div class="text-right">
-          <div class="relative inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold"
-               id="status-pill">
-            <span class="relative flex h-2.5 w-2.5" aria-hidden="true">
-              <span id="status-ping" class="absolute inline-flex h-full w-full rounded-full opacity-0"></span>
-              <span id="status-dot" class="relative inline-flex h-2.5 w-2.5 rounded-full bg-slate-500"></span>
-            </span>
+        <div style="text-align:right">
+          <span id="status-pill" class="md-chip">
+            <span id="status-dot" class="md-dot" style="color:var(--md-outline)"></span>
             <span id="status-label">Unbekannt</span>
-          </div>
-          <p id="status-updated" class="mt-2 text-xs text-slate-500">–</p>
+          </span>
+          <p id="status-updated" class="md-body-s md-on-surface-variant" style="margin:8px 0 0">–</p>
         </div>
       </div>
 
       <!-- Leistungsverlauf der laufenden Sitzung (rein clientseitig gepuffert) -->
-      <div class="mt-6">
-        <div class="flex items-center justify-between text-xs text-slate-500">
-          <span>Verlauf (letzte <span id="spark-window">0</span> Messwerte)</span>
-          <span>Max <span id="spark-max" class="tabular-nums">0,0</span> kW</span>
+      <div style="margin-top:24px">
+        <div class="md-row" style="justify-content:space-between;gap:8px">
+          <span class="md-body-s md-on-surface-variant">
+            Verlauf (letzte <span id="spark-window">0</span> Messwerte)
+          </span>
+          <span class="md-body-s md-on-surface-variant">
+            Max <span id="spark-max" class="md-numeric">0,0</span> kW
+          </span>
         </div>
-        <div class="relative mt-2">
-          <svg id="sparkline" class="h-24 w-full" viewBox="0 0 600 100" preserveAspectRatio="none" role="img" aria-label="Verlauf der Ladeleistung">
+
+        <div style="position:relative;margin-top:8px">
+          <svg id="sparkline" viewBox="0 0 600 100" preserveAspectRatio="none" role="img"
+               aria-label="Verlauf der Ladeleistung" style="width:100%;height:110px;display:block">
             <defs>
               <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stop-color="#34d399" stop-opacity=".35"/>
-                <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+                <stop offset="0%"   stop-color="var(--md-primary)" stop-opacity=".30"/>
+                <stop offset="100%" stop-color="var(--md-primary)" stop-opacity="0"/>
               </linearGradient>
             </defs>
-            <!-- Grundlinie: die Flaeche wirkt sonst kaputt, solange noch keine Messwerte da sind. -->
-            <line x1="0" y1="97" x2="600" y2="97" stroke="currentColor" stroke-width="1"
-                  class="text-white/10" vector-effect="non-scaling-stroke"/>
+            <!-- Grundlinie: die Fläche wirkt sonst kaputt, solange keine Messwerte da sind. -->
+            <line x1="0" y1="97" x2="600" y2="97" stroke="var(--md-outline-variant)"
+                  stroke-width="1" vector-effect="non-scaling-stroke"/>
             <path id="spark-area" fill="url(#sparkFill)" d=""></path>
-            <path id="spark-line" fill="none" stroke="#34d399" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" d=""></path>
+            <path id="spark-line" fill="none" stroke="var(--md-primary)" stroke-width="2"
+                  stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" d=""></path>
           </svg>
-          <p id="spark-hint" class="absolute inset-0 grid place-items-center text-xs text-slate-500">
+          <p id="spark-hint" class="md-body-s md-on-surface-variant"
+             style="position:absolute;inset:0;display:grid;place-items:center;margin:0">
             Sammelt Messwerte …
           </p>
         </div>
       </div>
     </div>
 
-    <!-- Ladekarte / RFID -->
-    <div class="rounded-2xl border border-white/10 bg-slate-900 p-6">
-      <p class="text-xs font-medium uppercase tracking-widest text-slate-400">Aktive Ladekarte</p>
-      <p id="rfid-name" class="mt-3 text-2xl font-semibold text-white">–</p>
-      <p id="rfid-id" class="mt-1 font-mono text-xs text-slate-500">keine Karte erkannt</p>
+    <div class="md-card">
+      <div class="md-metric__label">Aktive Ladekarte</div>
+      <p id="rfid-name" class="md-headline-s" style="margin:12px 0 2px">–</p>
+      <p id="rfid-id" class="md-mono md-on-surface-variant" style="margin:0">keine Karte erkannt</p>
 
-      <dl class="mt-6 space-y-3 border-t border-white/10 pt-4 text-sm">
-        <div class="flex items-center justify-between">
-          <dt class="text-slate-400">Energie (Sitzung)</dt>
-          <dd id="session-energy" class="font-semibold tabular-nums">–</dd>
+      <hr class="md-divider" style="margin:20px 0">
+
+      <dl class="md-list" style="margin:0">
+        <div class="md-list__item" style="padding:10px 0">
+          <dt class="md-body-m md-on-surface-variant md-spacer">Energie (Sitzung)</dt>
+          <dd id="session-energy" class="md-label-l md-numeric" style="margin:0">–</dd>
         </div>
-        <div class="flex items-center justify-between">
-          <dt class="text-slate-400">Ladedauer</dt>
-          <dd id="session-duration" class="font-semibold tabular-nums">–</dd>
+        <div class="md-list__item" style="padding:10px 0">
+          <dt class="md-body-m md-on-surface-variant md-spacer">Ladedauer</dt>
+          <dd id="session-duration" class="md-label-l md-numeric" style="margin:0">–</dd>
         </div>
-        <div class="flex items-center justify-between">
-          <dt class="text-slate-400">Strom</dt>
-          <dd id="current" class="font-semibold tabular-nums">–</dd>
+        <div class="md-list__item" style="padding:10px 0">
+          <dt class="md-body-m md-on-surface-variant md-spacer">Strom</dt>
+          <dd id="current" class="md-label-l md-numeric" style="margin:0">–</dd>
         </div>
-        <div class="flex items-center justify-between">
-          <dt class="text-slate-400">Spannung</dt>
-          <dd id="voltage" class="font-semibold tabular-nums">–</dd>
+        <div class="md-list__item" style="padding:10px 0">
+          <dt class="md-body-m md-on-surface-variant md-spacer">Spannung</dt>
+          <dd id="voltage" class="md-label-l md-numeric" style="margin:0">–</dd>
         </div>
-        <div class="flex items-center justify-between">
-          <dt class="text-slate-400">Zählerstand</dt>
-          <dd id="meter" class="font-semibold tabular-nums">–</dd>
+        <div class="md-list__item" style="padding:10px 0">
+          <dt class="md-body-m md-on-surface-variant md-spacer">Zählerstand</dt>
+          <dd id="meter" class="md-label-l md-numeric" style="margin:0">–</dd>
         </div>
       </dl>
     </div>
   </section>
 
-  <!-- ===================== Monatsvorschau ===================== -->
-  <section class="mt-8">
-    <div class="flex flex-wrap items-end justify-between gap-3">
+  <!-- ===================== Abrechnungsvorschau ===================== -->
+  <section>
+    <div class="md-row" style="margin-bottom:16px">
       <div>
-        <h2 class="text-lg font-semibold tracking-tight">Abrechnungsvorschau</h2>
-        <p class="mt-0.5 text-sm text-slate-400">Aus der Ladehistorie der Wallbox berechnet – Grundlage für PDF und CSV.</p>
+        <h2 class="md-title-l" style="margin:0">Abrechnungsvorschau</h2>
+        <p class="md-body-m md-on-surface-variant" style="margin:4px 0 0">
+          Aus der Ladehistorie berechnet – Grundlage für PDF und CSV.
+        </p>
       </div>
-      <div class="flex items-center gap-2">
-        <label for="period" class="sr-only">Abrechnungsmonat</label>
-        <select id="period" class="rounded-lg border border-white/10 bg-slate-900 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"></select>
-        <button id="reload-report" type="button"
-                class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium hover:bg-white/10">
-          Aktualisieren
-        </button>
-      </div>
+      <span class="md-spacer"></span>
+      <label class="md-field" style="width:200px">
+        <select id="period" class="md-field__select"></select>
+        <span class="md-field__label">Abrechnungsmonat</span>
+        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
+      </label>
+      <button id="reload-report" type="button" class="md-btn md-btn--tonal">
+        <%- include('partials/icon', { name: 'refresh', size: 18 }) %> Aktualisieren
+      </button>
     </div>
 
-    <div id="report-loading" class="mt-4 rounded-xl border border-white/10 bg-slate-900 px-4 py-8 text-center text-sm text-slate-400">
-      Lade Abrechnungsdaten …
+    <div id="report-loading" class="md-card">
+      <div class="md-progress"><div class="md-progress__bar"></div></div>
+      <p class="md-body-m md-on-surface-variant" style="margin:16px 0 0;text-align:center">
+        Lade Abrechnungsdaten …
+      </p>
     </div>
 
-    <div id="report-content" class="mt-4 hidden">
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded-xl border border-white/10 bg-slate-900 p-4">
-          <p class="text-xs uppercase tracking-widest text-slate-400">Energie gesamt</p>
-          <p class="mt-1 text-2xl font-bold tabular-nums"><span id="kpi-energy">–</span> <span class="text-base font-medium text-slate-400">kWh</span></p>
+    <div id="report-content" class="hidden">
+      <div class="md-grid md-cols-4" style="margin-bottom:16px">
+        <div class="md-card">
+          <div class="md-metric__label">Energie gesamt</div>
+          <div class="md-metric__value"><span id="kpi-energy">–</span><span class="md-metric__unit">kWh</span></div>
         </div>
-        <div class="rounded-xl border border-white/10 bg-slate-900 p-4">
-          <p class="text-xs uppercase tracking-widest text-slate-400">Ladevorgänge</p>
-          <p class="mt-1 text-2xl font-bold tabular-nums" id="kpi-sessions">–</p>
+        <div class="md-card">
+          <div class="md-metric__label">Ladevorgänge</div>
+          <div class="md-metric__value" id="kpi-sessions">–</div>
         </div>
-        <div class="rounded-xl border border-white/10 bg-slate-900 p-4">
-          <p class="text-xs uppercase tracking-widest text-slate-400">Ladezeit</p>
-          <p class="mt-1 text-2xl font-bold tabular-nums" id="kpi-duration">–</p>
+        <div class="md-card">
+          <div class="md-metric__label">Ladezeit</div>
+          <div class="md-metric__value" id="kpi-duration">–</div>
         </div>
-        <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-          <p class="text-xs uppercase tracking-widest text-emerald-300/80">Erstattungsbetrag</p>
-          <p class="mt-1 text-2xl font-bold tabular-nums text-emerald-300" id="kpi-cost">–</p>
+        <div class="md-card md-card--primary">
+          <div class="md-metric__label">Erstattungsbetrag</div>
+          <div class="md-metric__value" id="kpi-cost">–</div>
         </div>
       </div>
 
-      <div class="mt-4 overflow-hidden rounded-xl border border-white/10 bg-slate-900">
-        <table class="w-full text-sm">
-          <caption class="sr-only">Verbrauch je Ladekarte im gewählten Abrechnungsmonat</caption>
-          <thead class="bg-white/5 text-xs uppercase tracking-wider text-slate-400">
-            <tr>
-              <th scope="col" class="px-4 py-2.5 text-left font-semibold">Ladekarte</th>
-              <th scope="col" class="px-4 py-2.5 text-left font-semibold">RFID</th>
-              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Vorgänge</th>
-              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Ladezeit</th>
-              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Energie</th>
-              <th scope="col" class="px-4 py-2.5 text-right font-semibold">Betrag</th>
-            </tr>
-          </thead>
-          <tbody id="report-rows" class="divide-y divide-white/5"></tbody>
-        </table>
+      <div class="md-card md-card--flush">
+        <div class="md-table-wrap">
+          <table class="md-table">
+            <caption class="sr-only">Verbrauch je Ladekarte im gewählten Abrechnungsmonat</caption>
+            <thead>
+              <tr>
+                <th scope="col">Ladekarte</th>
+                <th scope="col">RFID</th>
+                <th scope="col" class="md-num">Vorgänge</th>
+                <th scope="col" class="md-num">Ladezeit</th>
+                <th scope="col" class="md-num">Energie</th>
+                <th scope="col" class="md-num">Betrag</th>
+              </tr>
+            </thead>
+            <tbody id="report-rows"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </section>
 
+  <!-- ===================== Letzte Abrechnungsläufe ===================== -->
+  <% if (runs && runs.length > 0) { %>
+  <section style="margin-top:32px">
+    <h2 class="md-title-l" style="margin:0 0 4px">
+      <%- include('partials/icon', { name: 'history', size: 20 }) %> Letzte Abrechnungsläufe
+    </h2>
+    <p class="md-body-m md-on-surface-variant" style="margin:0 0 16px">
+      Automatische und manuell ausgelöste Läufe mit Ergebnis.
+    </p>
+
+    <div class="md-card md-card--flush">
+      <div class="md-table-wrap">
+        <table class="md-table">
+          <thead>
+            <tr>
+              <th scope="col">Zeitraum</th>
+              <th scope="col">Gestartet</th>
+              <th scope="col">Auslöser</th>
+              <th scope="col" class="md-num">Energie</th>
+              <th scope="col">Versand</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% runs.forEach(function (run) { %>
+              <tr>
+                <td><span class="md-label-l"><%= run.periodKey %></span></td>
+                <td class="md-body-s md-on-surface-variant">
+                  <%= new Date(run.startedAt).toLocaleString(settings.billing.locale) %>
+                </td>
+                <td class="md-body-s md-on-surface-variant"><%= run.triggeredBy %></td>
+                <td class="md-num"><%= run.energyKwh === null ? '–' : run.energyKwh + ' kWh' %></td>
+                <td class="md-body-s md-on-surface-variant"><%= run.mailTo || '–' %></td>
+                <td>
+                  <% if (run.ok) { %>
+                    <span class="md-chip md-chip--primary md-chip--small">
+                      <%- include('partials/icon', { name: 'check', size: 14 }) %> erfolgreich
+                    </span>
+                  <% } else { %>
+                    <span class="md-chip md-chip--error md-chip--small" title="<%= run.error %>">
+                      <%- include('partials/icon', { name: 'error', size: 14 }) %> fehlgeschlagen
+                    </span>
+                  <% } %>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  <% } %>
+
 </main>
 
-<!-- Server-gerenderte Startdaten. type="application/json" wird nicht ausgeführt;
-     das Nonce deckt die CSP dennoch sauber ab. -->
+<footer class="md-content" style="padding-top:0;padding-bottom:32px">
+  <p class="md-body-s md-on-surface-variant" style="margin:0">
+    Mennekes Wallbox Billing &middot; Zeitzone <%= settings.billing.timezone %> &middot;
+    Arbeitspreis <%= settings.billing.pricePerKwh.toFixed(4).replace('.', ',') %> <%= settings.billing.currency %>/kWh
+  </p>
+</footer>
+
 <script id="bootstrap-data" type="application/json" nonce="<%= cspNonce %>">
   <%- JSON.stringify({
         initialState: initialState || null,
@@ -179,6 +252,6 @@
         timezone: settings.billing.timezone,
       }) %>
 </script>
-<script src="/static/js/dashboard.js" nonce="<%= cspNonce %>"></script>
+<script src="/static/js/dashboard.js" nonce="<%= cspNonce %>" defer></script>
 
 <%- include('partials/foot') %>

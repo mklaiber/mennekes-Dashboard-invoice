@@ -2,7 +2,8 @@
 
 const LiveFeed = require('../src/services/liveFeed');
 const { enrichWithIdentity } = require('../src/services/liveFeed');
-const settingsStore = require('../src/config/settings');
+const settingsStore = require('../src/repositories/settingsRepository');
+const { resetDatabase } = require('./helpers/testDb');
 const MennekesClient = require('../src/services/mennekesClient');
 const fixtures = require('./fixtures/wallbox');
 
@@ -16,6 +17,7 @@ function fakeClient() {
 }
 
 beforeEach(() => {
+  resetDatabase();
   settingsStore.reset();
   settingsStore.save({ rfidMappings: fixtures.rfidMappings });
 });

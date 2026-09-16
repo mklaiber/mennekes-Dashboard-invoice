@@ -17,7 +17,7 @@
 const { EventEmitter } = require('events');
 const config = require('../config');
 const logger = require('../utils/logger');
-const settingsStore = require('../config/settings');
+const settingsStore = require('../repositories/settingsRepository');
 const MennekesClient = require('./mennekesClient');
 const { resolveRfid } = require('./billing');
 

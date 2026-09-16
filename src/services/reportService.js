@@ -14,12 +14,13 @@ const fs = require('fs/promises');
 const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger');
-const settingsStore = require('../config/settings');
+const settingsStore = require('../repositories/settingsRepository');
 const MennekesClient = require('./mennekesClient');
 const { buildMonthlyReport } = require('./billing');
 const { generateInvoicePdf, pdfFileName } = require('./pdfService');
 const { buildDetailCsv, buildSummaryCsv, csvFileName } = require('./csvService');
 const { sendMonthlyReport } = require('./mailer');
+const reportRuns = require('../repositories/reportRunRepository');
 const { monthRange, previousMonth } = require('../utils/dates');
 
 /**
@@ -111,7 +112,8 @@ async function generateArtifacts(report, settings, options = {}) {
  * @param {import('nodemailer').Transporter} [params.transporter]
  * @param {object} [params.settings]
  * @param {string} [params.outputDir]
- * @returns {Promise<{report:object, files:object, mail:object|null}>}
+ * @param {string} [params.triggeredBy] 'cron' oder 'manual:<benutzer>' für die Historie
+ * @returns {Promise<{report:object, files:object, mail:object|null, runId:number}>}
  */
 async function runMonthlyReport(params = {}) {
   const activeSettings = params.settings || settingsStore.load();
@@ -122,35 +124,46 @@ async function runMonthlyReport(params = {}) {
   const year = params.year ?? fallback.year;
   const month = params.month ?? fallback.month;
 
-  logger.info(`Starte Monatsabrechnung für ${year}-${String(month).padStart(2, '0')}.`);
+  const periodKey = `${year}-${String(month).padStart(2, '0')}`;
+  logger.info(`Starte Monatsabrechnung für ${periodKey}.`);
 
-  const report = await buildReportForMonth({
-    year,
-    month,
-    client: params.client,
-    settings: activeSettings,
-  });
+  // Der Lauf wird vor der ersten Aktion vermerkt: bricht er ab, bleibt die
+  // Zeile mit Fehlermeldung stehen statt spurlos zu verschwinden.
+  const runId = reportRuns.start({ periodKey, triggeredBy: params.triggeredBy || 'unbekannt' });
 
-  const files = await generateArtifacts(report, activeSettings, { outputDir: params.outputDir });
-
-  let mail = null;
-  if (params.sendMail !== false) {
-    mail = await sendMonthlyReport({
-      report,
+  try {
+    const report = await buildReportForMonth({
+      year,
+      month,
+      client: params.client,
       settings: activeSettings,
-      to: params.to,
-      transporter: params.transporter,
-      attachments: [
-        { filename: files.pdf.fileName, content: files.pdf.buffer, contentType: 'application/pdf' },
-        { filename: files.csvDetail.fileName, content: files.csvDetail.content, contentType: 'text/csv; charset=utf-8' },
-        { filename: files.csvSummary.fileName, content: files.csvSummary.content, contentType: 'text/csv; charset=utf-8' },
-      ],
     });
-  } else {
-    logger.info('Mailversand übersprungen (sendMail=false).');
-  }
 
-  return { report, files, mail };
+    const files = await generateArtifacts(report, activeSettings, { outputDir: params.outputDir });
+
+    let mail = null;
+    if (params.sendMail !== false) {
+      mail = await sendMonthlyReport({
+        report,
+        settings: activeSettings,
+        to: params.to,
+        transporter: params.transporter,
+        attachments: [
+          { filename: files.pdf.fileName, content: files.pdf.buffer, contentType: 'application/pdf' },
+          { filename: files.csvDetail.fileName, content: files.csvDetail.content, contentType: 'text/csv; charset=utf-8' },
+          { filename: files.csvSummary.fileName, content: files.csvSummary.content, contentType: 'text/csv; charset=utf-8' },
+        ],
+      });
+    } else {
+      logger.info('Mailversand übersprungen (sendMail=false).');
+    }
+
+    reportRuns.finishOk(runId, { report, files, mail });
+    return { report, files, mail, runId };
+  } catch (error) {
+    reportRuns.finishFailed(runId, error.message);
+    throw error;
+  }
 }
 
 /**

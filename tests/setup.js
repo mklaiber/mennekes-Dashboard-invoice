@@ -14,8 +14,11 @@ process.env.NODE_ENV = 'test';
 process.env.LOG_LEVEL = 'silent';
 process.env.TZ = 'Europe/Berlin';
 
-process.env.AUTH_USER = 'testuser';
-process.env.AUTH_PASSWORD = 'testpassword';
+process.env.AUTH_USER = 'testadmin';
+process.env.AUTH_PASSWORD = 'test-passwort-1234';
+process.env.AUTH_MIN_PASSWORD_LENGTH = '12';
+// Secure-Cookies würden über HTTP im Test nie gesetzt.
+process.env.SESSION_COOKIE_SECURE = 'false';
 
 process.env.MENNEKES_BASE_URL = 'http://wallbox.test';
 process.env.MENNEKES_AUTH_MODE = 'none';
@@ -27,11 +30,12 @@ process.env.MAIL_TO = 'buchhaltung@example.com';
 
 process.env.CRON_ENABLED = 'false';
 
-// Jeder Testlauf bekommt ein eigenes Arbeitsverzeichnis - keine Kollisionen,
-// keine Reste im Projektordner.
+// Jede Testdatei bekommt ein eigenes Arbeitsverzeichnis - keine Kollisionen,
+// keine Reste im Projektordner. Die Datenbank läuft im Speicher.
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wallbox-test-'));
 process.env.OUTPUT_DIR = path.join(tempRoot, 'reports');
 process.env.SETTINGS_FILE = path.join(tempRoot, 'settings.json');
+process.env.DATABASE_FILE = ':memory:';
 process.env.DOTENV_PATH = path.join(tempRoot, '.env.absent');
 
 global.__TEST_TEMP_ROOT__ = tempRoot;

@@ -35,14 +35,14 @@
 
   /* ------------------------------------------------------------------ Status */
 
-  // Farbschema je Wallbox-Zustand: Klassen für Pille, Punkt und Puls-Ring.
+  // Farbschema je Wallbox-Zustand, ausgedrückt in Material-Farbrollen.
   var STATUS_STYLES = {
-    charging:  { pill: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300', dot: 'bg-emerald-400', ping: 'bg-emerald-400 animate-pulse-ring opacity-75' },
-    connected: { pill: 'border-sky-500/40 bg-sky-500/10 text-sky-300',             dot: 'bg-sky-400',     ping: 'opacity-0' },
-    standby:   { pill: 'border-slate-500/40 bg-slate-500/10 text-slate-300',       dot: 'bg-slate-400',   ping: 'opacity-0' },
-    error:     { pill: 'border-red-500/40 bg-red-500/10 text-red-300',             dot: 'bg-red-400',     ping: 'bg-red-400 animate-pulse-ring opacity-75' },
-    offline:   { pill: 'border-slate-700 bg-slate-800/50 text-slate-400',          dot: 'bg-slate-600',   ping: 'opacity-0' },
-    unknown:   { pill: 'border-slate-700 bg-slate-800/50 text-slate-400',          dot: 'bg-slate-600',   ping: 'opacity-0' },
+    charging:  { chip: 'md-chip md-chip--primary', color: 'var(--md-primary)',  pulse: true },
+    connected: { chip: 'md-chip',                  color: 'var(--md-tertiary)', pulse: false },
+    standby:   { chip: 'md-chip',                  color: 'var(--md-outline)',  pulse: false },
+    error:     { chip: 'md-chip md-chip--error',   color: 'var(--md-error)',    pulse: true },
+    offline:   { chip: 'md-chip',                  color: 'var(--md-outline)',  pulse: false },
+    unknown:   { chip: 'md-chip',                  color: 'var(--md-outline)',  pulse: false },
   };
 
   var powerHistory = [];
@@ -50,9 +50,10 @@
   function renderStatus(state) {
     var style = STATUS_STYLES[state.status] || STATUS_STYLES.unknown;
 
-    $('status-pill').className = 'relative inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold ' + style.pill;
-    $('status-dot').className = 'relative inline-flex h-2.5 w-2.5 rounded-full ' + style.dot;
-    $('status-ping').className = 'absolute inline-flex h-full w-full rounded-full ' + style.ping;
+    $('status-pill').className = style.chip;
+    var dot = $('status-dot');
+    dot.className = 'md-dot' + (style.pulse ? ' md-dot--pulse' : '');
+    dot.style.color = style.color;
     $('status-label').textContent = state.statusLabel || 'Unbekannt';
 
     $('status-updated').textContent = 'Stand: ' + new Date(state.timestamp).toLocaleTimeString(LOCALE, {
@@ -136,15 +137,24 @@
     $('error-banner').classList.remove('hidden');
   }
 
+
   function hideError() {
     $('error-banner').classList.add('hidden');
   }
 
   function setConnection(state, text) {
-    var colors = { live: 'bg-emerald-400', retry: 'bg-amber-400', down: 'bg-red-400', idle: 'bg-slate-500' };
-    $('connection-dot').className = 'h-2 w-2 rounded-full ' + (colors[state] || colors.idle);
+    var colors = {
+      live:  'var(--md-primary)',
+      retry: 'var(--md-warning)',
+      down:  'var(--md-error)',
+      idle:  'var(--md-outline)',
+    };
+    var chip = $('connection');
+    chip.className = 'md-chip' + (state === 'live' ? ' md-chip--primary' : (state === 'down' ? ' md-chip--error' : ''));
+    var dot = $('connection-dot');
+    dot.className = 'md-dot' + (state === 'live' ? ' md-dot--pulse' : '');
+    dot.style.color = colors[state] || colors.idle;
     $('connection-text').textContent = text;
-    $('connection-text').className = state === 'live' ? 'text-emerald-300' : 'text-slate-400';
   }
 
   /* --------------------------------------------------------------------- SSE */
@@ -216,7 +226,6 @@
   function loadReport() {
     var parts = $('period').value.split('-');
     $('report-loading').classList.remove('hidden');
-    $('report-loading').textContent = 'Lade Abrechnungsdaten …';
     $('report-content').classList.add('hidden');
 
     fetch('/api/report?year=' + parts[0] + '&month=' + parts[1], { headers: { Accept: 'application/json' } })
@@ -226,7 +235,8 @@
       })
       .then(renderReport)
       .catch(function (error) {
-        $('report-loading').textContent = 'Abrechnungsdaten konnten nicht geladen werden (' + error.message + ').';
+        $('report-loading').innerHTML = '<div class="md-banner md-banner--error">'
+          + 'Abrechnungsdaten konnten nicht geladen werden: ' + escapeHtml(error.message) + '</div>';
       });
   }
 
@@ -237,18 +247,20 @@
     $('kpi-cost').textContent = moneyFmt(report.totals.billableCost);
 
     $('report-rows').innerHTML = report.groups.length === 0
-      ? '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">Keine Ladevorgänge in diesem Monat.</td></tr>'
+      ? '<tr><td colspan="6" style="text-align:center;padding:40px 16px" class="md-on-surface-variant">'
+        + 'Keine Ladevorgänge in diesem Monat.</td></tr>'
       : report.groups.map(function (group) {
         var badge = group.knownRfid ? ''
-          : ' <span class="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">nicht zugeordnet</span>';
-        var plate = group.plate ? '<div class="text-xs text-slate-500">' + escapeHtml(group.plate) + '</div>' : '';
-        return '<tr class="hover:bg-white/[.03]">'
-          + '<td class="px-4 py-2.5"><span class="font-medium">' + escapeHtml(group.name) + '</span>' + badge + plate + '</td>'
-          + '<td class="px-4 py-2.5 font-mono text-xs text-slate-400">' + escapeHtml(group.rfidRaw || group.rfid) + '</td>'
-          + '<td class="px-4 py-2.5 text-right tabular-nums">' + group.sessionCount + '</td>'
-          + '<td class="px-4 py-2.5 text-right tabular-nums">' + escapeHtml(group.duration) + '</td>'
-          + '<td class="px-4 py-2.5 text-right tabular-nums">' + numberFmt(group.energyKwh, 2) + ' kWh</td>'
-          + '<td class="px-4 py-2.5 text-right font-semibold tabular-nums">' + moneyFmt(group.cost) + '</td>'
+          : ' <span class="md-chip md-chip--warning md-chip--small">nicht zugeordnet</span>';
+        var plate = group.plate
+          ? '<div class="md-body-s md-on-surface-variant">' + escapeHtml(group.plate) + '</div>' : '';
+        return '<tr>'
+          + '<td><span class="md-label-l">' + escapeHtml(group.name) + '</span>' + badge + plate + '</td>'
+          + '<td class="md-mono md-on-surface-variant">' + escapeHtml(group.rfidRaw || group.rfid) + '</td>'
+          + '<td class="md-num">' + group.sessionCount + '</td>'
+          + '<td class="md-num">' + escapeHtml(group.duration) + '</td>'
+          + '<td class="md-num">' + numberFmt(group.energyKwh, 2) + ' kWh</td>'
+          + '<td class="md-num"><span class="md-label-l">' + moneyFmt(group.cost) + '</span></td>'
           + '</tr>';
       }).join('');
 

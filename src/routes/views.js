@@ -7,9 +7,11 @@
 
 const express = require('express');
 const config = require('../config');
-const settingsStore = require('../config/settings');
+const settingsStore = require('../repositories/settingsRepository');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { requireRole } = require('../middleware/auth');
 const { listGeneratedFiles } = require('../services/reportService');
+const reportRuns = require('../repositories/reportRunRepository');
 const { previousMonth, MONTH_NAMES_DE } = require('../utils/dates');
 
 /**
@@ -30,11 +32,13 @@ function createViewRouter({ liveFeed }) {
       // Startwert, damit die Kacheln nicht leer aufblitzen, bevor SSE greift.
       initialState: liveFeed.lastState,
       pollIntervalMs: config.live.pollIntervalMs,
+      // Historie nur für Administratoren: sie nennt Empfängeradressen.
+      runs: req.user?.role === 'admin' ? reportRuns.list(8) : [],
     });
   });
 
-  /** Ansicht 2: Einstellungen. */
-  router.get('/einstellungen', asyncHandler(async (req, res) => {
+  /** Ansicht 2: Einstellungen - nur für Administratoren. */
+  router.get('/einstellungen', requireRole('admin'), asyncHandler(async (req, res) => {
     const settings = settingsStore.load();
     const files = await listGeneratedFiles();
     const fallback = previousMonth(new Date(), settings.billing.timezone);
@@ -44,6 +48,7 @@ function createViewRouter({ liveFeed }) {
       active: 'settings',
       settings,
       files,
+      runs: reportRuns.list(15),
       months: MONTH_NAMES_DE.map((name, index) => ({ value: index + 1, name })),
       defaultYear: fallback.year,
       defaultMonth: fallback.month,

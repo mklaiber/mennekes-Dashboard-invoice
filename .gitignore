@@ -30,3 +30,9 @@ Thumbs.db
 ansible/inventory.ini
 ansible/group_vars/all.yml
 ansible/*.retry
+
+# Versehentlich angelegte SQLite-Sonderdatei (siehe config/index.js)
+:memory:
+
+# SQLite-Sonderwert, falls er doch einmal als Datei landet
+:memory:

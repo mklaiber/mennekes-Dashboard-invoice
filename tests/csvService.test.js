@@ -2,9 +2,14 @@
 
 const { buildDetailCsv, buildSummaryCsv, csvFileName, decimal, hhmm, UTF8_BOM } = require('../src/services/csvService');
 const { buildMonthlyReport } = require('../src/services/billing');
-const { rfidLookup } = require('../src/config/settings');
+const { rfidLookup } = require('../src/repositories/settingsRepository');
+const { resetDatabase } = require('./helpers/testDb');
 const MennekesClient = require('../src/services/mennekesClient');
 const fixtures = require('./fixtures/wallbox');
+
+beforeEach(() => {
+  resetDatabase();
+});
 
 function makeReport(overrides = {}) {
   const sessions = fixtures.sessionsMarch2026.transactions

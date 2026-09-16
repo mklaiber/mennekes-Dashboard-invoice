@@ -1,7 +1,7 @@
 {
   "name": "mennekes-wallbox-billing",
   "version": "1.0.0",
-  "description": "Monatliche Ladestrom-Abrechnung (PDF + CSV) und Live-Dashboard für MENNEKES Wallboxen",
+  "description": "Monatliche Ladestrom-Abrechnung (druckfertiges PDF + CSV), Material-Design-Dashboard und Benutzerverwaltung auf SQLite für MENNEKES Wallboxen",
   "main": "src/server.js",
   "engines": {
     "node": ">=20.0.0"
@@ -22,12 +22,15 @@
     "charging",
     "billing",
     "invoice",
-    "dashboard"
+    "dashboard",
+    "sqlite",
+    "material-design"
   ],
   "license": "MIT",
   "dependencies": {
     "@json2csv/plainjs": "^7.0.6",
     "axios": "^1.7.7",
+    "better-sqlite3": "^13.0.3",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",

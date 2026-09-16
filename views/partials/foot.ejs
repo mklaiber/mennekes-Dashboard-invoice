@@ -1,6 +1,23 @@
-<footer class="mx-auto max-w-7xl px-4 pb-10 pt-4 text-xs text-slate-500 sm:px-6">
-  Mennekes Wallbox Billing &middot; Zeitzone <%= settings.billing.timezone %> &middot;
-  Arbeitspreis <%= settings.billing.pricePerKwh.toFixed(4).replace('.', ',') %> <%= settings.billing.currency %>/kWh
-</footer>
+</div><!-- /.md-app -->
+
+<!-- Kurzmeldungen und Bestätigungsdialog liegen einmal pro Seite bereit. -->
+<div id="md-snackbar" class="md-snackbar" role="status" aria-live="polite">
+  <span data-snackbar-text class="md-spacer"></span>
+  <button type="button" class="md-icon-btn" data-snackbar-close aria-label="Meldung schließen">
+    <%- include('icon', { name: 'close', size: 18 }) %>
+  </button>
+</div>
+
+<dialog id="md-confirm" class="md-dialog">
+  <div class="md-dialog__panel">
+    <h2 class="md-dialog__title" data-confirm-title></h2>
+    <p class="md-body-l md-on-surface-variant" data-confirm-body style="margin:0"></p>
+    <div class="md-dialog__actions">
+      <button type="button" class="md-btn md-btn--text" data-confirm-cancel>Abbrechen</button>
+      <button type="button" class="md-btn md-btn--filled" data-confirm-ok>Bestätigen</button>
+    </div>
+  </div>
+</dialog>
+
 </body>
 </html>
