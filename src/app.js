@@ -28,6 +28,7 @@ const { createApiRouter } = require('./routes/api');
 const { createViewRouter } = require('./routes/views');
 const { createAuthRouter, createAccountRouter } = require('./routes/auth');
 const { createUserRouter } = require('./routes/users');
+const { createIngestRouter } = require('./routes/ingest');
 const MennekesClient = require('./services/mennekesClient');
 const LiveFeed = require('./services/liveFeed');
 
@@ -124,6 +125,11 @@ function createApp(deps = {}) {
     res.locals.active = '';
     next();
   });
+
+  // Datenannahme vom Connector: eigene Authentifizierung über ein gemeinsames
+  // Geheimnis, deshalb VOR der Benutzeranmeldung. Der Connector ist kein Nutzer
+  // und bekommt weder Sitzung noch Rolle.
+  app.use('/api/ingest', createIngestRouter({ liveFeed }));
 
   // ------------------------------------------------- Authentifizierungskette
   app.use(attachUser());

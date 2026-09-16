@@ -22,6 +22,7 @@ const { buildDetailCsv, buildSummaryCsv, csvFileName } = require('./csvService')
 const { sendMonthlyReport } = require('./mailer');
 const reportRuns = require('../repositories/reportRunRepository');
 const { monthRange, previousMonth } = require('../utils/dates');
+const sessionSource = require('./sessionSource');
 
 /**
  * Holt die Ladehistorie und rechnet den Monat durch - ohne Dateien zu erzeugen.
@@ -39,8 +40,18 @@ async function buildReportForMonth({ year, month, client, settings } = {}) {
   const timezone = activeSettings.billing.timezone || config.billing.timezone;
   const period = monthRange(year, month, timezone);
 
-  const activeClient = client || new MennekesClient({ baseUrl: activeSettings.wallbox.baseUrl });
-  const sessions = await activeClient.getChargingSessions(period.start, period.end);
+  // Im Connector-Betrieb ist die Wallbox von hier aus nicht erreichbar - dann
+  // liefert sessionSource die Daten aus der eigenen Datenbank und der Client
+  // wird gar nicht erst gebaut.
+  const activeClient = sessionSource.isConnectorMode()
+    ? null
+    : (client || new MennekesClient({ baseUrl: activeSettings.wallbox.baseUrl }));
+
+  const sessions = await sessionSource.getSessions({
+    from: period.start,
+    to: period.end,
+    client: activeClient,
+  });
 
   logger.info(`${sessions.length} Ladevorgänge für ${period.label} geladen.`);
 

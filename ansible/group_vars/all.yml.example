@@ -32,7 +32,16 @@ smtp_secure: false
 smtp_user: wallbox@example.com
 smtp_password: "BITTE-ERSETZEN"
 
+# ----------------------------- Datenquelle -----------------------------------
+# 'direct'    - der Server erreicht die Wallbox selbst
+# 'connector' - ein Home-Assistant-Add-on im Heimnetz liefert die Daten
+data_source: direct
+# Nur bei data_source: connector. Muss mit target_token im Add-on übereinstimmen.
+# Erzeugen mit: openssl rand -hex 32
+connector_token: ""
+
 # ------------------------------- Wallbox -------------------------------------
+# Im Connector-Betrieb ohne Bedeutung - dann steht die Adresse im Add-on.
 mennekes_base_url: "http://192.168.1.50"
 # none | basic | bearer | apikey
 mennekes_auth_mode: none

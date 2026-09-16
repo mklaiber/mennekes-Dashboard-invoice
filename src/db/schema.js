@@ -107,6 +107,47 @@ const MIGRATIONS = [
       CREATE INDEX idx_runs_started ON report_runs(started_at DESC);
     `,
   },
+  {
+    version: 2,
+    name: 'connector-ingest',
+    up: `
+      -- ------------------------------------------------------- Ladevorgänge
+      -- Vom Connector aus dem Heimnetz gelieferte, abgeschlossene Ladevorgänge.
+      -- Die ID stammt aus der Wallbox; ein erneutes Senden aktualisiert den
+      -- Datensatz, statt ihn zu verdoppeln.
+      CREATE TABLE charging_sessions (
+        id               TEXT    PRIMARY KEY,
+        start_at         TEXT    NOT NULL,
+        end_at           TEXT,
+        duration_seconds INTEGER NOT NULL DEFAULT 0,
+        energy_kwh       REAL    NOT NULL,
+        rfid             TEXT    NOT NULL DEFAULT 'unbekannt',
+        rfid_raw         TEXT    NOT NULL DEFAULT '',
+        meter_start_kwh  REAL,
+        meter_end_kwh    REAL,
+        source           TEXT    NOT NULL DEFAULT 'connector',
+        received_at      TEXT    NOT NULL,
+        -- Rohdatensatz der Wallbox, damit sich eine Abweichung später
+        -- nachvollziehen lässt, ohne die Wallbox erneut zu befragen.
+        payload          TEXT    NOT NULL DEFAULT ''
+      );
+      CREATE INDEX idx_charging_start ON charging_sessions(start_at);
+      CREATE INDEX idx_charging_rfid  ON charging_sessions(rfid);
+
+      -- ---------------------------------------------------- Connector-Zustand
+      -- Genau eine Zeile: der zuletzt gemeldete Live-Zustand und wann sich der
+      -- Connector zuletzt gemeldet hat.
+      CREATE TABLE connector_state (
+        id                INTEGER PRIMARY KEY CHECK (id = 1),
+        last_seen_at      TEXT,
+        last_status       TEXT NOT NULL DEFAULT '',
+        connector_version TEXT NOT NULL DEFAULT '',
+        remote_ip         TEXT NOT NULL DEFAULT '',
+        sessions_received INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO connector_state (id) VALUES (1);
+    `,
+  },
 ];
 
 module.exports = { MIGRATIONS };

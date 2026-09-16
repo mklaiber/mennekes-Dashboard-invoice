@@ -2,13 +2,18 @@
 
 // Puppeteer mocken - diese Suite fasst die Report-Routen nicht an, aber die
 // App lädt den pdfService beim Start.
+// Alle Methoden geben Promises zurück - der echte Puppeteer tut das auch,
+// und pdfService hängt an einige davon ein .catch().
 jest.mock('puppeteer', () => ({
   launch: jest.fn(async () => ({
     newPage: jest.fn(async () => ({
-      setContent: jest.fn(), evaluate: jest.fn(),
-      pdf: jest.fn(async () => Buffer.from('%PDF')), close: jest.fn(),
+      setContent: jest.fn(async () => undefined),
+      evaluate: jest.fn(async () => undefined),
+      pdf: jest.fn(async () => Buffer.from('%PDF')),
+      close: jest.fn(async () => undefined),
     })),
-    close: jest.fn(), connected: true,
+    close: jest.fn(async () => undefined),
+    connected: true,
   })),
 }));
 

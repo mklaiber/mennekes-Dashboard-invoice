@@ -12,6 +12,12 @@
  * Es läuft genau EIN Poll-Timer für alle verbundenen Clients (Fan-out),
  * damit die Wallbox nicht pro geöffnetem Tab abgefragt wird. Ohne Clients
  * pausiert der Timer vollständig.
+ *
+ * Zwei Betriebsarten:
+ *  - **Abfrage** (Standard): Der Timer fragt die Wallbox selbst ab.
+ *  - **Push** (`pushOnly`): Die Wallbox ist von hier aus nicht erreichbar; ein
+ *    Connector aus dem Heimnetz liefert den Zustand über `publish()`. Dann darf
+ *    KEIN Timer laufen - er liefe in jeden Poll hinein einen Verbindungsfehler.
  */
 
 const { EventEmitter } = require('events');
@@ -48,7 +54,9 @@ class LiveFeed extends EventEmitter {
    */
   constructor(options = {}) {
     super();
-    this.client = options.client || new MennekesClient();
+    // Im Push-Betrieb wird kein Client gebaut: die Wallbox ist nicht erreichbar.
+    this.pushOnly = options.pushOnly ?? (config.connector.mode === 'connector');
+    this.client = options.client || (this.pushOnly ? null : new MennekesClient());
     this.pollIntervalMs = options.pollIntervalMs || config.live.pollIntervalMs;
 
     /** @type {Set<import('express').Response>} */
@@ -75,8 +83,11 @@ class LiveFeed extends EventEmitter {
     logger.debug(`SSE-Client verbunden (${this.subscribers.size} aktiv).`);
 
     // Sofortiger Zustand, damit das Dashboard nicht bis zum nächsten Poll leer bleibt.
-    if (this.lastState) this.#writeTo(res, 'status', this.lastState);
-    else this.poll().catch(() => { /* Fehler wird über das 'error'-Event verteilt. */ });
+    if (this.lastState) {
+      this.#writeTo(res, 'status', this.lastState);
+    } else if (!this.pushOnly) {
+      this.poll().catch(() => { /* Fehler wird über das 'error'-Event verteilt. */ });
+    }
 
     this.start();
   }
@@ -91,9 +102,9 @@ class LiveFeed extends EventEmitter {
     if (this.subscribers.size === 0) this.stop();
   }
 
-  /** Startet den Poll-Timer (idempotent). */
+  /** Startet den Poll-Timer (idempotent; im Push-Betrieb ein No-Op). */
   start() {
-    if (this.timer) return;
+    if (this.pushOnly || this.timer) return;
     this.timer = setInterval(() => {
       this.poll().catch(() => { /* bereits in poll() behandelt */ });
     }, this.pollIntervalMs);
@@ -135,6 +146,23 @@ class LiveFeed extends EventEmitter {
     } finally {
       this.polling = false;
     }
+  }
+
+  /**
+   * Übernimmt einen von außen gelieferten Zustand (Connector-Betrieb).
+   *
+   * Entspricht einem erfolgreichen Poll: der Zustand wird zum letzten bekannten
+   * und sofort an alle offenen Dashboards verteilt.
+   *
+   * @param {object} state bereits normalisierter und angereicherter Zustand
+   * @returns {object} derselbe Zustand
+   */
+  publish(state) {
+    this.lastState = state;
+    this.lastError = null;
+    this.broadcast('status', state);
+    this.emit('status', state);
+    return state;
   }
 
   /**

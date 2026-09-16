@@ -17,6 +17,8 @@ SQLite-Datei. Die Oberfläche folgt Material Design 3 und kommt ohne CDN aus.
 
 - [Funktionsumfang](#funktionsumfang)
 - [Schnellstart](#schnellstart)
+- [Betriebsarten: direkt oder über Connector](#betriebsarten-direkt-oder-über-connector)
+- [Home-Assistant-Add-on](#home-assistant-add-on)
 - [Anmeldung und Benutzerverwaltung](#anmeldung-und-benutzerverwaltung)
 - [Datenbank](#datenbank)
 - [Druckbares PDF](#druckbares-pdf)
@@ -47,7 +49,8 @@ SQLite-Datei. Die Oberfläche folgt Material Design 3 und kommt ohne CDN aus.
 | **Automatisierung** | `node-cron`, läuft am Monatsletzten und rechnet den ablaufenden Monat ab |
 | **Einstellungen** | WebUI für Wallbox-Adresse, Preis, Empfänger, Stammdaten und RFID-Mapping |
 | **Sicherheit** | Sitzungs-Auth mit CSRF-Schutz, scrypt-Passwörter, Helmet mit CSP und Nonce, Rate-Limit, Whitelist-Validierung, Path-Traversal-Schutz |
-| **Deployment** | Dockerfile (System-Chromium, non-root), `docker-compose.yml`, Ansible-Playbook |
+| **Betriebsarten** | direkt im selben Netz **oder** über ein Home-Assistant-Add-on, das die Wallbox im Heimnetz liest und die Daten ausgehend liefert |
+| **Deployment** | Dockerfile (System-Chromium, non-root), `docker-compose.yml`, Ansible-Playbook, HA-Add-on |
 
 ---
 
@@ -90,6 +93,132 @@ $EDITOR .env
 docker compose up -d --build
 docker compose logs -f
 ```
+
+---
+
+## Betriebsarten: direkt oder über Connector
+
+Über `DATA_SOURCE` wird festgelegt, woher die Ladedaten kommen. Alles darüber –
+Abrechnung, PDF, CSV, Zeitplan, Dashboard – kennt diesen Unterschied nicht.
+
+### `direct` (Standard)
+
+Die Anwendung läuft im selben Netz wie die Wallbox und fragt deren REST-API
+selbst ab.
+
+```
+┌─────────────┐        ┌──────────────────┐
+│   Wallbox   │◀───────│  Abrechnung      │
+│ 192.168.x.x │  lesen │  (gleiches Netz) │
+└─────────────┘        └──────────────────┘
+```
+
+### `connector`
+
+Die Anwendung läuft außerhalb – auf einem Server, bei einem Hoster, im
+Internet. Die Wallbox bleibt im Heimnetz und soll **nicht** nach außen
+erreichbar sein. Ein Home-Assistant-Add-on liest sie dort und schiebt die Daten
+hierher.
+
+```
+   Heimnetz                                       Internet
+  ┌─────────────┐      ┌───────────────┐        ┌──────────────┐
+  │   Wallbox   │◀────▶│   Connector   │───────▶│  Abrechnung  │
+  │ 192.168.x.x │ lesen│ (HA-Add-on)   │ senden │              │
+  └─────────────┘      └───────────────┘        └──────────────┘
+```
+
+Entscheidend ist die **Richtung**: der Connector baut die Verbindung nach außen
+auf. Damit braucht der Router keine Portweiterleitung, und die Wallbox ist aus
+dem Internet nicht erreichbar.
+
+```dotenv
+DATA_SOURCE=connector
+CONNECTOR_TOKEN=<openssl rand -hex 32>
+```
+
+`MENNEKES_BASE_URL` wird dann nicht mehr gebraucht; die Adresse der Wallbox
+steht in den Optionen des Add-ons.
+
+### Was sich dadurch ändert
+
+| | `direct` | `connector` |
+|---|---|---|
+| Ladehistorie | wird bei Bedarf von der Wallbox geholt | liegt in der Tabelle `charging_sessions` |
+| Live-Zustand | ein Poll-Timer je Server | der Connector schiebt, der Server verteilt nur noch |
+| `/api/health` | „erreichbar" = Wallbox antwortet | „erreichbar" = der Connector meldet sich |
+| Ausfall sichtbar | Fehlerbanner im Dashboard | Hinweis, seit wann sich der Connector nicht meldet |
+
+Ein leerer Abrechnungsmonat ist in dieser Betriebsart mehrdeutig – er kann echt
+sein oder bedeuten, dass nie geliefert wurde. Deshalb steht der Zustand des
+Connectors im Dashboard und im Protokoll.
+
+---
+
+## Home-Assistant-Add-on
+
+Das Add-on liegt im Ordner [`mennekes-connector/`](mennekes-connector/), die
+ausführliche Anleitung in [`mennekes-connector/DOCS.md`](mennekes-connector/DOCS.md).
+
+### Installation
+
+In Home Assistant unter **Einstellungen → Add-ons → Add-on-Store → ⋮ →
+Repositories** diese Repo-URL eintragen. Das Add-on erscheint danach im Store
+und wird lokal gebaut.
+
+Alternativ ohne Store: den Ordner `mennekes-connector/` in die Freigabe
+`/addons/` von Home Assistant kopieren und den Store neu laden.
+
+### Wichtigste Optionen
+
+```yaml
+wallbox_url: "http://192.168.1.50"       # Wallbox im Heimnetz
+endpoint_status: "/api/v1/status"
+endpoint_sessions: "/api/v1/transactions"
+target_url: "https://abrechnung.example.com"
+target_token: "<derselbe Wert wie CONNECTOR_TOKEN>"
+status_interval_seconds: 10              # Live-Werte
+sessions_interval_seconds: 900           # Ladehistorie
+```
+
+### Zwei Takte, zwei Verhaltensweisen
+
+- **Live-Werte** werden bei einem Fehler nicht wiederholt. Ein zehn Sekunden
+  alter Messwert nützt niemandem, der nächste steht ohnehin an.
+- **Ladevorgänge** landen in einer persistenten Warteschlange unter `/data`.
+  Fällt Internet, Gegenstelle oder Strom aus, bleiben sie erhalten und werden
+  nachgeliefert. Sie sind die Grundlage der Abrechnung und lassen sich nicht
+  rekonstruieren, wenn die Wallbox ihre Historie überschreibt.
+
+Bereits zugestellte Vorgänge merkt sich das Add-on, damit dieselbe Fahrt nicht
+bei jedem Abruf erneut übermittelt wird. Dauerhaft abgelehnte Datensätze werden
+verworfen – sonst blockierte ein einzelner fehlerhafter Eintrag für immer alle
+nachfolgenden.
+
+### Schnittstelle der Datenannahme
+
+Diese Routen haben eine eigene Authentifizierung über das gemeinsame Geheimnis
+und liegen deshalb vor der Benutzeranmeldung. Der Connector ist kein Nutzer: er
+darf ausschließlich liefern, nichts lesen und nichts ändern.
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| `GET` | `/api/ingest/health` | Selbsttest: Erreichbarkeit und Token prüfen |
+| `POST` | `/api/ingest/status` | aktueller Zustand der Wallbox |
+| `POST` | `/api/ingest/sessions` | abgeschlossene Ladevorgänge (per ID aktualisiert, nie verdoppelt) |
+
+Bei `DATA_SOURCE=direct` gibt es diese Routen nicht – sie antworten mit 404.
+
+```bash
+curl -H "Authorization: Bearer $CONNECTOR_TOKEN" \
+     https://abrechnung.example.com/api/ingest/health
+```
+
+### Was das Add-on nicht tut
+
+Es legt **keine Home-Assistant-Entitäten** an – ein reiner Vermittler, wie
+angefragt. Es steuert die Wallbox nicht, öffnet keinen Port und hat keine
+Bedienoberfläche.
 
 ---
 
@@ -311,7 +440,9 @@ dem Erstattungsbetrag herausnehmen; im Einzelnachweis bleibt sie sichtbar.
 │   │   ├── sessionRepository.js   Sitzungen (nur Token-Hash gespeichert)
 │   │   ├── settingsRepository.js  Einstellungen + RFID, Migration aus JSON
 │   │   ├── auditRepository.js     Protokoll
-│   │   └── reportRunRepository.js Historie der Abrechnungsläufe
+│   │   ├── reportRunRepository.js Historie der Abrechnungsläufe
+│   │   ├── chargingSessionRepository.js  vom Connector gelieferte Ladevorgänge
+│   │   └── connectorStateRepository.js   Zustand und letzte Meldung
 │   ├── services/
 │   │   ├── mennekesClient.js  REST-Client inkl. Normalisierung und Retry
 │   │   ├── billing.js         Gruppierung, Kostenberechnung (I/O-frei)
@@ -319,14 +450,17 @@ dem Erstattungsbetrag herausnehmen; im Einzelnachweis bleibt sie sichtbar.
 │   │   ├── csvService.js      Detail- und Summen-CSV
 │   │   ├── mailer.js          nodemailer, HTML- und Text-Body
 │   │   ├── reportService.js   Orchestrierung: Abruf → Dateien → Versand
-│   │   └── liveFeed.js        SSE-Broadcast mit einem Poll-Timer für alle Clients
+│   │   ├── sessionSource.js   Datenquelle: Wallbox abfragen oder Connector-Daten lesen
+│   │   └── liveFeed.js        SSE-Broadcast; pollt oder nimmt Push entgegen
 │   ├── routes/
 │   │   ├── api.js             REST + SSE
 │   │   ├── views.js           HTML-Seiten
 │   │   ├── auth.js            Anmeldung, Abmeldung, Passwortwechsel
-│   │   └── users.js           Benutzerverwaltung (nur Administrator)
+│   │   ├── users.js           Benutzerverwaltung (nur Administrator)
+│   │   └── ingest.js          Datenannahme vom Connector (eigene Auth)
 │   ├── middleware/
 │   │   ├── auth.js            Sitzungen, Rollen, CSRF, Basic-Auth für /api
+│   │   ├── connectorAuth.js   Bearer-Token des Connectors (timing-safe)
 │   │   └── errorHandler.js    404, zentraler Fehlerhandler, asyncHandler
 │   ├── jobs/scheduler.js      node-cron + Monatsletzter-Prüfung
 │   └── utils/
@@ -346,10 +480,16 @@ dem Erstattungsbetrag herausnehmen; im Einzelnachweis bleibt sie sichtbar.
 ├── public/
 │   ├── css/material.css       Material Design 3, selbst gehostet
 │   └── js/                    material.js, dashboard.js, settings.js, users.js
-├── tests/                     15 Suites, 370 Tests
+├── tests/                     16 Suites, 413 Tests
 │   ├── fixtures/wallbox.js    nachgebildete API-Antworten
 │   └── setup.js               ENV für den Testlauf
 ├── scripts/run-report.js      CLI für manuelle Läufe und Nachläufe
+├── mennekes-connector/        Home-Assistant-Add-on (reiner Datenvermittler)
+│   ├── config.yaml            Add-on-Manifest und Optionsschema
+│   ├── Dockerfile / build.yaml / run.sh
+│   ├── DOCS.md                Anleitung im Add-on-Store
+│   └── app/                   Connector: Wallbox lesen, Warteschlange, Uplink
+├── repository.yaml            macht das Repo zum HA-Add-on-Store
 ├── ansible/                   Playbook, env.j2, Inventar-Vorlagen
 ├── Dockerfile
 └── docker-compose.yml
@@ -456,7 +596,9 @@ node scripts/run-report.js --to test@firma.de             # Testversand
 ## Tests
 
 ```bash
-npm test               # 15 Suites, 370 Tests
+npm test               # 16 Suites, 413 Tests (Server)
+npm run test:connector # 37 Tests (Add-on, Test-Runner von Node)
+npm run test:all       # beides
 npm run test:coverage
 npm run lint
 ```
@@ -478,6 +620,17 @@ npm run lint
 | `sessionRepository` | Token-Hashing, Ablauf, Widerruf, Aufräumen |
 | `users.api` | Benutzerverwaltung über HTTP, Selbst-Aussperren, Protokoll |
 | `app` | Anmeldung, Rollen, CSRF, erzwungener Passwortwechsel, Security-Header, Path-Traversal, SSE |
+| `ingest` | Connector-Token, Dubletten, unplausible Werte, Abrechnung ohne Wallbox-Zugriff |
+
+Das Add-on nutzt den Test-Runner von Node (`node --test`), damit das Image keine
+Entwicklungsabhängigkeiten mitschleppt:
+
+| Suite | Prüft |
+|---|---|
+| `queue` | Persistenz über Neustarts, keine Dubletten, Überlauf, kaputte Datei |
+| `uplink` | Welche Fehler einen erneuten Versuch rechtfertigen, Bestätigung je ID |
+| `options` | Pflichtangaben, TLS-Zwang, bashios „null" |
+| `identify` | stabile Ersatz-IDs, Antwortformen der Wallbox |
 
 Die Wallbox wird durchgehend gemockt; Puppeteer ist in den Unit-Tests ersetzt.
 Die Datenbank läuft im Arbeitsspeicher und wird vor jedem Test neu migriert, so
@@ -485,7 +638,10 @@ dass kein Test von einem anderen abhängt.
 
 Zusätzlich manuell gegen echte Komponenten geprüft (nicht Teil von `npm test`):
 Anmeldung und Rollen gegen einen echten Server, PDF-Erzeugung mit echtem
-Chromium und Nachmessen der Seitenränder am gerasterten PDF.
+Chromium und Nachmessen der Seitenränder am gerasterten PDF sowie die
+vollständige Connector-Kette – nachgebildete Wallbox, echter Connector-Code,
+echter Server – einschließlich Ausfall der Gegenstelle, Neustart des Add-ons
+und Nachzustellung.
 
 ---
 
@@ -543,6 +699,9 @@ Details, Tags und Vault-Nutzung: [`ansible/README.md`](ansible/README.md).
 | Niemand kann sich mehr anmelden | Datenbankdatei sichern, Container stoppen, `wallbox.sqlite` beiseitelegen und neu starten: der Start-Administrator aus der `.env` wird dann neu angelegt |
 | Inhalt am Blattrand abgeschnitten | Seitenränder unter *Einstellungen* erhöhen; unter 10 mm liegt der Rand im nicht bedruckbaren Bereich |
 | Schrift wirkt anders als erwartet | Kein Zugriff auf Google Fonts; die Oberfläche nutzt dann den System-Zeichensatz und bleibt voll bedienbar |
+| Dashboard meldet „Connector hat sich noch nie gemeldet" | Im Add-on `target_url` und `target_token` prüfen; `CONNECTOR_TOKEN` muss identisch sein |
+| Connector meldet `404` | Das Online-Tool läuft nicht mit `DATA_SOURCE=connector` |
+| Abrechnung im Connector-Betrieb leer | Im Add-on-Protokoll prüfen, ob Vorgänge übermittelt wurden; `history_days` erhöhen, falls der Monat weiter zurückliegt |
 
 Logs:
 

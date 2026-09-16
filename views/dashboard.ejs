@@ -17,6 +17,30 @@
     </span>
   </div>
 
+  <% if (connector) { %>
+    <div class="md-banner <%= connector.connected ? 'md-banner--info' : 'md-banner--warning' %>"
+         style="margin-bottom:24px" id="connector-banner">
+      <%- include('partials/icon', { name: connector.connected ? 'shield' : 'warning' }) %>
+      <span>
+        <% if (connector.connected) { %>
+          <strong>Connector verbunden.</strong>
+          Die Wallbox wird über das Home-Assistant-Add-on im Heimnetz gelesen –
+          zuletzt vor <%= connector.secondsSinceLastSeen %> Sekunden.
+          <% if (connector.version) { %>(Version <%= connector.version %>)<% } %>
+        <% } else if (!connector.lastSeenAt) { %>
+          <strong>Der Connector hat sich noch nie gemeldet.</strong>
+          Bis dahin bleiben Live-Anzeige und Abrechnung leer. Bitte im
+          Home-Assistant-Add-on <span class="md-mono">target_url</span> und
+          <span class="md-mono">target_token</span> prüfen.
+        <% } else { %>
+          <strong>Der Connector meldet sich seit
+          <%= Math.round(connector.secondsSinceLastSeen / 60) %> Minuten nicht mehr.</strong>
+          Die angezeigten Werte sind nicht aktuell. Läuft das Add-on in Home Assistant noch?
+        <% } %>
+      </span>
+    </div>
+  <% } %>
+
   <div id="error-banner" class="md-banner md-banner--error hidden" role="alert" style="margin-bottom:24px">
     <%- include('partials/icon', { name: 'warning' }) %>
     <span><strong>Wallbox nicht erreichbar:</strong> <span id="error-message"></span></span>

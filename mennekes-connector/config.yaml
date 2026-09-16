@@ -1,0 +1,79 @@
+# =============================================================================
+#  Home-Assistant-Add-on: Mennekes Wallbox Connector
+#
+#  Reiner Datenvermittler. Liest die Wallbox im Heimnetz über deren REST-API
+#  und schiebt die Werte an das Online-Tool. Die Verbindung geht ausschließlich
+#  von hier nach AUSSEN - die Wallbox bleibt im LAN und braucht weder eine
+#  Portweiterleitung noch eine öffentliche Adresse.
+# =============================================================================
+
+name: Mennekes Wallbox Connector
+version: "1.0.0"
+slug: mennekes_connector
+description: >-
+  Liest die Ladedaten einer MENNEKES Wallbox im Heimnetz aus und übermittelt sie
+  an die Online-Abrechnung. Ausschließlich ausgehende Verbindungen.
+url: https://github.com/mklaiber/mennekes-Dashboard-invoice
+
+arch:
+  - aarch64
+  - amd64
+  - armv7
+
+# Der Connector braucht keine offenen Ports: er ruft nur nach außen.
+# Kein "ports"-Abschnitt, kein "ingress", keine "webui".
+
+init: false
+startup: application
+boot: auto
+
+# Zugriff auf das lokale Netz, um die Wallbox zu erreichen.
+host_network: false
+
+# Zusätzliche Freigaben sind nicht nötig: /data steht jedem Add-on zur
+# Verfügung und wird von Home Assistant persistiert. Dort liegt die
+# Warteschlange der noch nicht zugestellten Ladevorgänge.
+
+options:
+  wallbox_url: "http://192.168.1.50"
+  wallbox_auth_mode: none
+  wallbox_username: ""
+  wallbox_password: ""
+  wallbox_token: ""
+  endpoint_status: "/api/v1/status"
+  endpoint_sessions: "/api/v1/transactions"
+  endpoint_meter: ""
+  target_url: "https://abrechnung.example.com"
+  target_token: ""
+  status_interval_seconds: 10
+  sessions_interval_seconds: 900
+  history_days: 45
+  verify_tls: true
+  wallbox_verify_tls: true
+  log_level: info
+
+schema:
+  # --- Wallbox im Heimnetz --------------------------------------------------
+  wallbox_url: url
+  wallbox_auth_mode: "list(none|basic|bearer|apikey)"
+  wallbox_username: str?
+  wallbox_password: password?
+  wallbox_token: password?
+  endpoint_status: str
+  endpoint_sessions: str
+  endpoint_meter: str?
+  wallbox_verify_tls: bool
+
+  # --- Online-Tool ----------------------------------------------------------
+  target_url: url
+  target_token: password
+  verify_tls: bool
+
+  # --- Takt -----------------------------------------------------------------
+  # Live-Werte häufig, Historie selten: abgeschlossene Ladevorgänge ändern sich
+  # nicht mehr, ein Abruf alle 15 Minuten genügt.
+  status_interval_seconds: "int(5,300)"
+  sessions_interval_seconds: "int(60,86400)"
+  history_days: "int(1,365)"
+
+  log_level: "list(debug|info|warn|error)"

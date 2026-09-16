@@ -33,11 +33,18 @@
       ansible.builtin.assert:
         that:
           - auth_password is defined and auth_password | length >= 12
-          - mennekes_base_url is defined and mennekes_base_url | length > 0
           - mail_to is defined and mail_to | length > 0
+          # Im direkten Betrieb muss die Wallbox erreichbar sein, im
+          # Connector-Betrieb stattdessen das gemeinsame Geheimnis stehen.
+          - (data_source | default('direct')) != 'direct'
+            or (mennekes_base_url is defined and mennekes_base_url | length > 0)
+          - (data_source | default('direct')) != 'connector'
+            or (connector_token is defined and connector_token | length >= 32)
         fail_msg: >-
           Fehlende oder zu schwache Variablen. Benötigt: auth_password (>= 12 Zeichen),
-          mennekes_base_url, mail_to. Vorlage: group_vars/all.yml.example
+          mail_to, und je nach data_source entweder mennekes_base_url (direct)
+          oder connector_token (>= 32 Zeichen, connector).
+          Vorlage: group_vars/all.yml.example
         quiet: true
       tags: [always]
 

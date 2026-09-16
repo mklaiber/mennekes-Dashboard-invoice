@@ -13,7 +13,9 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage --runInBand",
     "lint": "eslint src tests",
-    "report:run": "node scripts/run-report.js"
+    "report:run": "node scripts/run-report.js",
+    "test:connector": "npm --prefix mennekes-connector/app test",
+    "test:all": "npm test && npm run test:connector"
   },
   "keywords": [
     "mennekes",
@@ -60,7 +62,8 @@
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "/tests/fixtures/"
+      "/tests/fixtures/",
+      "/mennekes-connector/"
     ],
     "setupFiles": [
       "<rootDir>/tests/setup.js"

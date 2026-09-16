@@ -161,6 +161,21 @@ const config = {
     logoUrl: raw('LOGO_URL'),
   },
 
+  connector: {
+    // 'direct'    - die Anwendung fragt die Wallbox selbst ab (gleiches Netz)
+    // 'connector' - ein Home-Assistant-Add-on im Heimnetz schiebt die Daten her;
+    //               die Wallbox ist von hier aus NICHT erreichbar
+    mode: str('DATA_SOURCE', 'direct').toLowerCase(),
+    // Gemeinsames Geheimnis. Erzeugen mit: openssl rand -hex 32
+    token: raw('CONNECTOR_TOKEN'),
+    // Ab wann gilt der Connector als abgemeldet? Großzügig gewählt, damit eine
+    // kurze Netzstörung im Heimnetz nicht sofort als Ausfall erscheint.
+    staleAfterSeconds: int('CONNECTOR_STALE_SECONDS', 120),
+    // Obergrenze je Sendung, damit ein fehlerhafter Connector den Server nicht
+    // mit einer Riesenliste belegt.
+    maxSessionsPerRequest: int('CONNECTOR_MAX_BATCH', 500),
+  },
+
   scheduler: {
     enabled: bool('CRON_ENABLED', true),
     // Standard: letzter Tag des Monats um 23:30 Uhr. node-cron erlaubt 'L' nicht,
@@ -195,6 +210,20 @@ const config = {
 function assertProductionSecrets(cfg = config) {
   const missing = [];
   if (!cfg.auth.password) missing.push('AUTH_PASSWORD');
+
+  // Im Connector-Betrieb wird die Wallbox nie direkt angesprochen; ihre Adresse
+  // ist dann bedeutungslos, das gemeinsame Geheimnis dafür zwingend.
+  if (cfg.connector?.mode === 'connector') {
+    if (!cfg.connector.token) missing.push('CONNECTOR_TOKEN');
+    if (missing.length > 0) {
+      throw new Error(
+        `Fehlende Pflicht-Umgebungsvariablen: ${missing.join(', ')}. `
+        + 'Bitte .env befüllen (Vorlage: .env.example) oder per Ansible/Docker injizieren.'
+      );
+    }
+    return;
+  }
+
   if (!cfg.mennekes.baseUrl) missing.push('MENNEKES_BASE_URL');
   if (cfg.mennekes.authMode === 'basic' && !cfg.mennekes.password) missing.push('MENNEKES_PASSWORD');
   if (['bearer', 'apikey'].includes(cfg.mennekes.authMode) && !cfg.mennekes.token) missing.push('MENNEKES_TOKEN');

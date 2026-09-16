@@ -16,6 +16,7 @@ const { requireRole } = require('../middleware/auth');
 const audit = require('../repositories/auditRepository');
 const { buildReportForMonth, runMonthlyReport, listGeneratedFiles } = require('../services/reportService');
 const { enrichWithIdentity } = require('../services/liveFeed');
+const sessionSource = require('../services/sessionSource');
 const { previousMonth } = require('../utils/dates');
 
 /**
@@ -89,8 +90,20 @@ function createApiRouter({ liveFeed, mennekesClient }) {
 
   /** GET /api/status - einmaliger Zustandsabruf (Polling-Fallback ohne SSE). */
   router.get('/status', asyncHandler(async (req, res) => {
+    // Im Connector-Betrieb ist die Wallbox von hier aus nicht erreichbar -
+    // ausgeliefert wird der zuletzt gelieferte Zustand.
+    if (sessionSource.isConnectorMode()) {
+      if (!liveFeed.lastState) {
+        throw Object.assign(
+          new Error('Der Connector hat noch keinen Zustand geliefert.'),
+          { status: 503, code: 'connector_no_data' }
+        );
+      }
+      return res.json(liveFeed.lastState);
+    }
+
     const state = await mennekesClient.getLiveStatus();
-    res.json(enrichWithIdentity(state));
+    return res.json(enrichWithIdentity(state));
   }));
 
   // ---------------------------------------------------------------- Abrechnung
@@ -289,11 +302,14 @@ function createApiRouter({ liveFeed, mennekesClient }) {
    * Nutzbar als Docker-Healthcheck (benötigt Basic-Auth-Credentials).
    */
   router.get('/health', asyncHandler(async (req, res) => {
-    const wallbox = await mennekesClient.ping();
-    res.status(wallbox.reachable ? 200 : 503).json({
-      status: wallbox.reachable ? 'ok' : 'degraded',
+    // Im Connector-Betrieb sagt "erreichbar" nichts über die Wallbox aus,
+    // sondern darüber, ob sich der Connector noch meldet.
+    const source = await sessionSource.getSourceHealth(mennekesClient);
+    res.status(source.reachable ? 200 : 503).json({
+      status: source.reachable ? 'ok' : 'degraded',
       uptimeSeconds: Math.round(process.uptime()),
-      wallbox,
+      dataSource: source,
+      wallbox: source,
       database: { ok: true, users: require('../repositories/userRepository').count() },
       liveSubscribers: liveFeed.subscriberCount,
       version: require('../../package.json').version,

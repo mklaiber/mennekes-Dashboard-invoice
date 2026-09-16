@@ -1,0 +1,11 @@
+# Basis-Images je Architektur. Alpine 3.21 bringt Node.js 22 mit.
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.21
+  amd64: ghcr.io/home-assistant/amd64-base:3.21
+  armv7: ghcr.io/home-assistant/armv7-base:3.21
+
+labels:
+  org.opencontainers.image.title: Mennekes Wallbox Connector
+  org.opencontainers.image.description: Ausgehender Datenvermittler für die Ladestrom-Abrechnung
+  org.opencontainers.image.source: https://github.com/mklaiber/mennekes-Dashboard-invoice
+  org.opencontainers.image.licenses: MIT

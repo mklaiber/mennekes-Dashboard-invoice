@@ -1,0 +1,7 @@
+# Home-Assistant-Add-on-Repository.
+#
+# In Home Assistant unter  Einstellungen → Add-ons → Add-on-Store → ⋮ →
+# "Repositories" diese Repo-URL eintragen; das Add-on erscheint danach im Store.
+name: Mennekes Wallbox
+url: https://github.com/mklaiber/mennekes-Dashboard-invoice
+maintainer: mklaiber

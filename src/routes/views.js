@@ -12,6 +12,8 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { requireRole } = require('../middleware/auth');
 const { listGeneratedFiles } = require('../services/reportService');
 const reportRuns = require('../repositories/reportRunRepository');
+const connectorState = require('../repositories/connectorStateRepository');
+const sessionSource = require('../services/sessionSource');
 const { previousMonth, MONTH_NAMES_DE } = require('../utils/dates');
 
 /**
@@ -34,6 +36,10 @@ function createViewRouter({ liveFeed }) {
       pollIntervalMs: config.live.pollIntervalMs,
       // Historie nur für Administratoren: sie nennt Empfängeradressen.
       runs: req.user?.role === 'admin' ? reportRuns.list(8) : [],
+      // Im Connector-Betrieb muss sichtbar sein, ob die Brücke ins Heimnetz
+      // noch steht - sonst ist ein stilles Dashboard nicht von "lädt gerade
+      // nicht" zu unterscheiden.
+      connector: sessionSource.isConnectorMode() ? connectorState.health() : null,
     });
   });
 
