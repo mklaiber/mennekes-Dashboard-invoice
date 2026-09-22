@@ -364,3 +364,69 @@ describe('buildFooterTemplate (Lage der Fußzeile)', () => {
     expect(template).toContain('&lt;img onerror=x&gt;');
   });
 });
+
+describe('Fuhrpark in der PDF-Vorlage', () => {
+  /** Ladevorgänge mit eingefrorener Zuordnung, wie sie seit Migration 3 vorliegen. */
+  function fleetSessions() {
+    const base = {
+      start: new Date('2026-03-05T10:00:00Z'),
+      end: new Date('2026-03-05T12:00:00Z'),
+      durationSeconds: 7200,
+      rfid: 'aaaa1111', rfidRaw: 'AA:AA:11:11',
+    };
+    return [
+      { ...base, id: 'f1', energyKwh: 22.5, vehicleId: 1, companyId: 1, employeeId: 1,
+        vehiclePlate: 'TUT-MK-100', companyName: 'Klaiber GmbH', employeeName: 'Moritz' },
+      { ...base, id: 'f2', energyKwh: 18.0, vehicleId: 2, companyId: 2, employeeId: 2,
+        vehiclePlate: 'TUT-SK-200', companyName: 'Andere AG', employeeName: 'Sabine' },
+      { ...base, id: 'f3', energyKwh: 4.0, vehicleId: null, companyId: null, employeeId: null,
+        vehiclePlate: '', companyName: '', employeeName: '' },
+    ];
+  }
+
+  it('stellt die Zusammenfassung je Fahrzeug dar', async () => {
+    const report = buildMonthlyReport({
+      sessions: fleetSessions(), year: 2026, month: 3, pricePerKwh: 0.3, timezone: 'Europe/Berlin',
+    });
+
+    const html = await pdfService.renderHtml(report, makeSettings());
+
+    expect(html).toContain('Zusammenfassung je Fahrzeug');
+    expect(html).toContain('TUT-MK-100');
+    expect(html).toContain('TUT-SK-200');
+    expect(html).toContain('Moritz');
+  });
+
+  it('weist nicht zugeordnete Energie ausdrücklich aus, statt sie zu verschweigen', async () => {
+    const report = buildMonthlyReport({
+      sessions: fleetSessions(), year: 2026, month: 3, pricePerKwh: 0.3, timezone: 'Europe/Berlin',
+    });
+
+    const html = await pdfService.renderHtml(report, makeSettings());
+
+    expect(html).toMatch(/Davon ohne Fahrzeugzuordnung/);
+    expect(html).toMatch(/4[.,]0+ kWh/);
+    expect(html).toContain('nicht zugeordnet');
+  });
+
+  it('zeigt die Firmenaufstellung nur, wenn mehr als eine Firma beteiligt ist', async () => {
+    const mehrere = await pdfService.renderHtml(
+      buildMonthlyReport({ sessions: fleetSessions(), year: 2026, month: 3, pricePerKwh: 0.3, timezone: 'Europe/Berlin' }),
+      makeSettings()
+    );
+    expect(mehrere).toContain('Zusammenfassung je Firma');
+
+    // Bei einem Bericht für genau eine Firma waere die Aufstellung eine
+    // Zeile mit der Gesamtsumme daneben - reines Rauschen.
+    const eine = await pdfService.renderHtml(
+      buildMonthlyReport({
+        sessions: fleetSessions(), year: 2026, month: 3, pricePerKwh: 0.3,
+        timezone: 'Europe/Berlin', scope: { kind: 'company', id: 1 },
+      }),
+      makeSettings()
+    );
+    expect(eine).not.toContain('Zusammenfassung je Firma');
+    expect(eine).toContain('TUT-MK-100');
+    expect(eine).not.toContain('TUT-SK-200');
+  });
+});

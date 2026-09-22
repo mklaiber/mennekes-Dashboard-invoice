@@ -239,6 +239,13 @@
     font-weight: 700;
   }
 
+  /* Hinweis unter einer Tabelle, z. B. nicht zugeordnete Energie. */
+  .note {
+    margin: 2mm 0 0;
+    font-size: 8pt;
+    color: var(--muted, #555);
+  }
+
   .badge {
     display: inline-block;
     padding: .2mm 1.5mm;
@@ -388,6 +395,93 @@
       <div class="hint">{{num report.totals.billableEnergyKwh 2}} kWh abrechenbar</div>
     </div>
   </div>
+
+  {{#if report.byCompany.length}}
+  {{#unless (eq report.byCompany.length 1)}}
+  <section>
+    <h2>Zusammenfassung je Firma <span class="count">({{report.byCompany.length}})</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Firma</th>
+          <th class="num">Vorgänge</th>
+          <th class="num">Energie</th>
+          <th class="num">Betrag</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each report.byCompany}}
+          <tr>
+            <td class="name-cell">
+              <span class="strong">{{this.label}}</span>
+              {{#unless this.assigned}} <span class="badge">ohne Firma</span>{{/unless}}
+            </td>
+            <td class="num">{{this.sessionCount}}</td>
+            <td class="num">{{num this.energyKwh 2}} kWh</td>
+            <td class="num strong">{{money this.cost}}</td>
+          </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </section>
+  {{/unless}}
+  {{/if}}
+
+  {{#if report.byVehicle.length}}
+  <section>
+    {{!-- Die abrechnungsrelevante Sicht: ein Fahrzeug kann mehrere Karten
+          haben, und der Arbeitgeber erstattet je Fahrzeug, nicht je Karte. --}}
+    <h2>Zusammenfassung je Fahrzeug <span class="count">({{report.totals.vehicleCount}})</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Fahrzeug</th>
+          <th>Mitarbeiter</th>
+          <th class="num">Vorgänge</th>
+          <th class="num">Ladezeit</th>
+          <th class="num">Energie</th>
+          <th class="num">Betrag</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each report.byVehicle}}
+          <tr>
+            <td class="name-cell">
+              <span class="strong">{{this.label}}</span>
+              {{#unless this.assigned}} <span class="badge">nicht zugeordnet</span>{{/unless}}
+              {{#if this.companyName}}<span class="plate">{{this.companyName}}</span>{{/if}}
+            </td>
+            <td>{{#if this.employeeName}}{{this.employeeName}}{{else}}&ndash;{{/if}}</td>
+            <td class="num">{{this.sessionCount}}</td>
+            <td class="num">{{this.duration}}</td>
+            <td class="num">{{num this.energyKwh 2}} kWh</td>
+            <td class="num strong">{{money this.cost}}</td>
+          </tr>
+        {{/each}}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2">Gesamt</td>
+          <td class="num">{{report.totals.sessionCount}}</td>
+          <td class="num">{{report.totals.duration}}</td>
+          <td class="num">{{num report.totals.energyKwh 2}} kWh</td>
+          <td class="num">{{money report.totals.cost}}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    {{#if report.totals.unassignedSessionCount}}
+      {{!-- Ausdruecklich ausweisen statt verschweigen: diese Energie ist
+            geflossen, gehoert aber keinem Fahrzeug und damit keiner
+            Firmenrechnung. --}}
+      <p class="note">
+        Davon ohne Fahrzeugzuordnung: {{report.totals.unassignedSessionCount}} Vorgang/Vorgänge
+        mit {{num report.totals.unassignedEnergyKwh 2}} kWh. Diese Ladevorgänge sind in keiner
+        Firmenabrechnung enthalten, solange ihre Karte keinem Fahrzeug zugeordnet ist.
+      </p>
+    {{/if}}
+  </section>
+  {{/if}}
 
   <section>
     <h2>Zusammenfassung je Ladekarte <span class="count">({{report.totals.rfidCount}})</span></h2>

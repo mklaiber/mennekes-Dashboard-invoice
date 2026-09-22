@@ -143,10 +143,10 @@ function save(patch, options = {}) {
 
 // ---------------------------------------------------------------- RFID-Karten
 
-/** @returns {Array<{rfid:string, rfidRaw:string, name:string, plate:string, billable:boolean}>} */
+/** @returns {Array<{rfid:string, rfidRaw:string, name:string, plate:string, billable:boolean, vehicleId:number|null}>} */
 function listRfidMappings() {
   return db().prepare(`
-    SELECT rfid, rfid_raw AS rfidRaw, name, plate, billable
+    SELECT rfid, rfid_raw AS rfidRaw, name, plate, billable, vehicle_id AS vehicleId
       FROM rfid_mappings ORDER BY name COLLATE NOCASE, rfid
   `).all().map((row) => ({ ...row, billable: Boolean(row.billable) }));
 }
@@ -177,16 +177,32 @@ function replaceRfidMappings(mappings) {
       name: String(entry.name || '').trim().slice(0, 120),
       plate: String(entry.plate || '').trim().slice(0, 32),
       billable: entry.billable === false ? 0 : 1,
+      // undefined = unveraendert lassen (siehe keptVehicles unten);
+      // null = ausdruecklich loesen.
+      vehicleId: entry.vehicleId === undefined ? undefined : (entry.vehicleId || null),
     });
   }
 
+  // Die Fahrzeugzuordnung ueberlebt das Ersetzen. Sie wird in der
+  // Fuhrpark-Verwaltung gepflegt, nicht in diesem Formular - ohne das
+  // Merken hier verloere jedes Speichern der Einstellungen saemtliche
+  // Karte-zu-Fahrzeug-Verbindungen, und alle neuen Ladevorgaenge fielen
+  // stillschweigend in "nicht zugeordnet".
+  const keptVehicles = new Map(
+    db().prepare('SELECT rfid, vehicle_id AS vehicleId FROM rfid_mappings').all()
+      .map((row) => [row.rfid, row.vehicleId])
+  );
+
   db().prepare('DELETE FROM rfid_mappings').run();
   const insert = db().prepare(`
-    INSERT INTO rfid_mappings (rfid, rfid_raw, name, plate, billable, created_at, updated_at)
-    VALUES (@rfid, @rfidRaw, @name, @plate, @billable, @ts, @ts)
+    INSERT INTO rfid_mappings (rfid, rfid_raw, name, plate, billable, vehicle_id, created_at, updated_at)
+    VALUES (@rfid, @rfidRaw, @name, @plate, @billable, @vehicleId, @ts, @ts)
   `);
   const ts = now();
-  for (const row of rows) insert.run({ ...row, ts });
+  for (const row of rows) {
+    const vehicleId = row.vehicleId !== undefined ? row.vehicleId : (keptVehicles.get(row.rfid) ?? null);
+    insert.run({ ...row, vehicleId, ts });
+  }
 }
 
 /**

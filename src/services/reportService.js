@@ -15,6 +15,7 @@ const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger');
 const settingsStore = require('../repositories/settingsRepository');
+const fleet = require('../repositories/fleetRepository');
 const MennekesClient = require('./mennekesClient');
 const { buildMonthlyReport } = require('./billing');
 const { generateInvoicePdf, pdfFileName } = require('./pdfService');
@@ -35,8 +36,32 @@ const sessionSource = require('./sessionSource');
  * @param {object} [params.settings]
  * @returns {Promise<object>} Report (siehe buildMonthlyReport)
  */
-async function buildReportForMonth({ year, month, client, settings } = {}) {
+/**
+ * Klartextbezeichnung eines Geltungsbereichs, fuer Protokoll und PDF-Kopf.
+ * @param {{kind:string, id:number|null}} scope
+ * @param {object|null} [company]
+ */
+function describeScope(scope, company = null) {
+  if (!scope || scope.kind === 'all') return 'Gesamt';
+  if (scope.kind === 'company')  return company ? company.name : `Firma ${scope.id}`;
+  if (scope.kind === 'vehicle')  return `Fahrzeug ${scope.id}`;
+  if (scope.kind === 'employee') return `Mitarbeiter ${scope.id}`;
+  if (scope.kind === 'unassigned') return 'Nicht zugeordnet';
+  return 'Gesamt';
+}
+
+async function buildReportForMonth({ year, month, client, settings, scope } = {}) {
   const activeSettings = settings || settingsStore.load();
+  const activeScope = scope && scope.kind ? scope : { kind: 'all', id: null };
+
+  // Bei einer Firma gilt deren eigener Arbeitspreis, sofern hinterlegt. null
+  // heisst ausdruecklich "globale Einstellung" - 0 waere ein echter Preis.
+  const company = activeScope.kind === 'company' && activeScope.id
+    ? fleet.findCompany(activeScope.id)
+    : null;
+  const pricePerKwh = company && company.pricePerKwh !== null
+    ? company.pricePerKwh
+    : activeSettings.billing.pricePerKwh;
   const timezone = activeSettings.billing.timezone || config.billing.timezone;
   const period = monthRange(year, month, timezone);
 
@@ -59,16 +84,21 @@ async function buildReportForMonth({ year, month, client, settings } = {}) {
     sessions,
     year,
     month,
-    pricePerKwh: activeSettings.billing.pricePerKwh,
+    pricePerKwh,
+    scope: activeScope,
     rfidLookup: settingsStore.rfidLookup(activeSettings.rfidMappings),
     currency: activeSettings.billing.currency,
     locale: activeSettings.billing.locale,
     timezone,
     meta: {
-      companyName: activeSettings.billing.companyName,
+      // Bei einem Firmenbericht steht die Firma im Kopf, nicht die globale
+      // Voreinstellung - sonst traegt jede Rechnung denselben Absender.
+      companyName: company ? company.name : activeSettings.billing.companyName,
+      companyAddress: company ? company.address : '',
       employeeName: activeSettings.billing.employeeName,
       vehiclePlate: activeSettings.billing.vehiclePlate,
       wallbox: activeSettings.wallbox.displayName,
+      scopeLabel: describeScope(activeScope, company),
     },
   });
 }
@@ -140,7 +170,15 @@ async function runMonthlyReport(params = {}) {
 
   // Der Lauf wird vor der ersten Aktion vermerkt: bricht er ab, bleibt die
   // Zeile mit Fehlermeldung stehen statt spurlos zu verschwinden.
-  const runId = reportRuns.start({ periodKey, triggeredBy: params.triggeredBy || 'unbekannt' });
+  const scope = params.scope && params.scope.kind ? params.scope : { kind: 'all', id: null };
+  const scopeCompany = scope.kind === 'company' && scope.id ? fleet.findCompany(scope.id) : null;
+
+  const runId = reportRuns.start({
+    periodKey,
+    triggeredBy: params.triggeredBy || 'unbekannt',
+    scope,
+    scopeLabel: describeScope(scope, scopeCompany),
+  });
 
   try {
     const report = await buildReportForMonth({
@@ -148,6 +186,7 @@ async function runMonthlyReport(params = {}) {
       month,
       client: params.client,
       settings: activeSettings,
+      scope,
     });
 
     const files = await generateArtifacts(report, activeSettings, { outputDir: params.outputDir });
@@ -157,7 +196,10 @@ async function runMonthlyReport(params = {}) {
       mail = await sendMonthlyReport({
         report,
         settings: activeSettings,
-        to: params.to,
+        // Eine Firma bekommt ihre Rechnung an ihre eigene Adresse. Fehlt sie,
+        // faellt es auf den globalen Empfaenger zurueck, statt den Lauf
+        // scheitern zu lassen - lieber zugestellt als verloren.
+        to: params.to || (scopeCompany && scopeCompany.contactEmail) || undefined,
         transporter: params.transporter,
         attachments: [
           { filename: files.pdf.fileName, content: files.pdf.buffer, contentType: 'application/pdf' },
@@ -175,6 +217,51 @@ async function runMonthlyReport(params = {}) {
     reportRuns.finishFailed(runId, error.message);
     throw error;
   }
+}
+
+
+/**
+ * Monatslauf ueber den gesamten Fuhrpark.
+ *
+ * Erzeugt fuer jede Firma mit `own_report` einen eigenen Bericht an ihre
+ * eigene Kontaktadresse - zwei Arbeitgeber bekommen nicht dieselbe PDF -
+ * und zusaetzlich eine Gesamtuebersicht an den globalen Empfaenger.
+ *
+ * Ein Fehlschlag bei einer Firma bricht den Lauf NICHT ab: die uebrigen
+ * Rechnungen sollen trotzdem herausgehen, und der Fehler steht in der
+ * Lauf-Historie. Sonst haette eine falsch hinterlegte Mailadresse die
+ * Abrechnung aller anderen verhindert.
+ *
+ * @param {object} [params] wie runMonthlyReport, ohne scope
+ * @returns {Promise<{results:Array<object>, failed:Array<{scopeLabel:string, error:string}>}>}
+ */
+async function runMonthlyReports(params = {}) {
+  const companies = fleet.listCompanies().filter((company) => company.ownReport);
+  const results = [];
+  const failed = [];
+
+  for (const company of companies) {
+    try {
+      const run = await runMonthlyReport({ ...params, scope: { kind: 'company', id: company.id } });
+      results.push({ scopeLabel: company.name, ...run });
+    } catch (error) {
+      logger.error(`Monatsbericht für "${company.name}" fehlgeschlagen: ${error.message}`);
+      failed.push({ scopeLabel: company.name, error: error.message });
+    }
+  }
+
+  // Gesamtuebersicht zum Schluss: sie enthaelt auch, was keiner Firma
+  // zugeordnet ist, und ist damit die Arbeitsliste fuer Nacharbeiten.
+  try {
+    const overall = await runMonthlyReport({ ...params, scope: { kind: 'all', id: null } });
+    results.push({ scopeLabel: 'Gesamt', ...overall });
+  } catch (error) {
+    logger.error(`Gesamtbericht fehlgeschlagen: ${error.message}`);
+    failed.push({ scopeLabel: 'Gesamt', error: error.message });
+  }
+
+  logger.info(`Monatslauf abgeschlossen: ${results.length} Bericht(e), ${failed.length} Fehlschlag/Fehlschlaege.`);
+  return { results, failed };
 }
 
 /**
@@ -200,4 +287,7 @@ async function listGeneratedFiles(outputDir = config.server.outputDir) {
   }
 }
 
-module.exports = { buildReportForMonth, generateArtifacts, runMonthlyReport, listGeneratedFiles };
+module.exports = {
+  buildReportForMonth, generateArtifacts, runMonthlyReport, runMonthlyReports,
+  listGeneratedFiles, describeScope,
+};

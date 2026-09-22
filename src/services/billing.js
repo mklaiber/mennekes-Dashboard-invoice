@@ -65,6 +65,62 @@ function resolveRfid(rfid, lookup) {
  * @param {object} [params.meta] freie Zusatzfelder für PDF-Kopf (companyName, employeeName, ...)
  * @returns {object} Report mit rows, groups, totals und Formatierungshilfen
  */
+/**
+ * Gilt der Ladevorgang im gewaehlten Geltungsbereich?
+ *
+ * Geprueft wird gegen die auf dem Datensatz EINGEFRORENE Zuordnung. Wer im
+ * September eine Karte umbucht, aendert damit nicht, wem der Maerz gehoert.
+ *
+ * @param {object} session
+ * @param {{kind:string, id:number|null}} scope
+ */
+function matchesScope(session, scope) {
+  if (!scope || !scope.kind || scope.kind === 'all') return true;
+  if (scope.kind === 'company')  return session.companyId === scope.id;
+  if (scope.kind === 'vehicle')  return session.vehicleId === scope.id;
+  if (scope.kind === 'employee') return session.employeeId === scope.id;
+  // "unassigned": alles, was zu keinem Fahrzeug gehoert - die Arbeitsliste,
+  // damit nichts unbemerkt liegen bleibt.
+  if (scope.kind === 'unassigned') return session.vehicleId === null;
+  return true;
+}
+
+/**
+ * Fasst Zeilen entlang einer Achse zusammen (Fahrzeug, Firma, Mitarbeiter).
+ *
+ * Die Kosten entstehen erst auf der Gruppensumme, nie als Summe gerundeter
+ * Einzelposten - sonst weicht die Gesamtsumme von der Multiplikation ab.
+ *
+ * @param {Array<object>} rows
+ * @param {(row:object) => {key:string|number, label:string, extra?:object}} classify
+ * @param {number} pricePerKwh
+ */
+function aggregateBy(rows, classify, pricePerKwh) {
+  const map = new Map();
+  for (const row of rows) {
+    const { key, label, extra = {} } = classify(row);
+    const id = key === null || key === undefined ? '__ohne__' : String(key);
+    if (!map.has(id)) {
+      map.set(id, {
+        key: key ?? null, label, ...extra,
+        sessionCount: 0, energyKwh: 0, durationSeconds: 0, rows: [],
+      });
+    }
+    const group = map.get(id);
+    group.sessionCount += 1;
+    group.energyKwh = round(group.energyKwh + row.energyKwh, 3);
+    group.durationSeconds += row.durationSeconds;
+    group.rows.push(row);
+  }
+  return [...map.values()]
+    .map((group) => ({
+      ...group,
+      cost: calculateCost(group.energyKwh, pricePerKwh),
+      duration: formatDuration(group.durationSeconds),
+    }))
+    .sort((a, b) => b.energyKwh - a.energyKwh);
+}
+
 function buildMonthlyReport({
   sessions = [],
   year,
@@ -75,6 +131,7 @@ function buildMonthlyReport({
   locale = 'de-DE',
   timezone = 'Europe/Berlin',
   meta = {},
+  scope = { kind: 'all', id: null },
 }) {
   const period = monthRange(year, month, timezone);
 
@@ -82,6 +139,7 @@ function buildMonthlyReport({
   const inPeriod = sessions
     .filter((session) => session && session.start instanceof Date)
     .filter((session) => session.start >= period.start && session.start < period.end)
+    .filter((session) => matchesScope(session, scope))
     .sort((a, b) => a.start - b.start);
 
   const rows = inPeriod.map((session) => {
@@ -107,6 +165,13 @@ function buildMonthlyReport({
       knownRfid: identity.known,
       meterStartKwh: session.meterStartKwh ?? null,
       meterEndKwh: session.meterEndKwh ?? null,
+      // Beim Eintreffen eingefrorene Zuordnung, nicht jetzt nachgeschlagen.
+      vehicleId: session.vehicleId ?? null,
+      vehiclePlate: session.vehiclePlate || '',
+      companyId: session.companyId ?? null,
+      companyName: session.companyName || '',
+      employeeId: session.employeeId ?? null,
+      employeeName: session.employeeName || '',
     };
   });
 
@@ -168,7 +233,42 @@ function buildMonthlyReport({
   totals.duration = formatDuration(totals.durationSeconds);
   totals.averageKwhPerSession = totals.sessionCount > 0 ? round(totals.energyKwh / totals.sessionCount, 2) : 0;
 
+  // Zusaetzliche Achsen. Die bisherige Gruppierung nach Karte bleibt
+  // unveraendert bestehen - sie ist weiterhin die feinste Aufloesung.
+  const byVehicle = aggregateBy(rows, (row) => ({
+    key: row.vehicleId,
+    label: row.vehiclePlate || 'Nicht zugeordnet',
+    extra: {
+      plate: row.vehiclePlate, companyId: row.companyId, companyName: row.companyName,
+      employeeId: row.employeeId, employeeName: row.employeeName,
+      assigned: row.vehicleId !== null,
+    },
+  }), pricePerKwh);
+
+  const byCompany = aggregateBy(rows, (row) => ({
+    key: row.companyId,
+    label: row.companyName || 'Ohne Firma',
+    extra: { companyId: row.companyId, assigned: row.companyId !== null },
+  }), pricePerKwh);
+
+  const byEmployee = aggregateBy(rows, (row) => ({
+    key: row.employeeId,
+    label: row.employeeName || 'Ohne Mitarbeiter',
+    extra: { employeeId: row.employeeId, companyName: row.companyName },
+  }), pricePerKwh);
+
+  totals.vehicleCount = byVehicle.length;
+  totals.companyCount = byCompany.filter((g) => g.assigned).length;
+  totals.unassignedSessionCount = rows.filter((row) => row.vehicleId === null).length;
+  totals.unassignedEnergyKwh = round(
+    rows.filter((row) => row.vehicleId === null).reduce((sum, row) => sum + row.energyKwh, 0), 3
+  );
+
   return {
+    scope: { kind: scope?.kind || 'all', id: scope?.id ?? null },
+    byVehicle,
+    byCompany,
+    byEmployee,
     period: {
       year: period.year,
       month: period.month,
@@ -218,6 +318,7 @@ function formatNumber(value, decimals = 2, locale = 'de-DE') {
 }
 
 module.exports = {
+  matchesScope, aggregateBy,
   buildMonthlyReport,
   calculateCost,
   resolveRfid,

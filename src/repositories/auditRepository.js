@@ -22,6 +22,13 @@ const ACTIONS = {
   SETTINGS_UPDATED: 'settings.updated',
   RFID_UPDATED: 'rfid.updated',
   REPORT_RUN: 'report.run',
+  FLEET_COMPANY_CREATED: 'fleet.company.created',
+  FLEET_COMPANY_UPDATED: 'fleet.company.updated',
+  FLEET_EMPLOYEE_CREATED: 'fleet.employee.created',
+  FLEET_EMPLOYEE_UPDATED: 'fleet.employee.updated',
+  FLEET_VEHICLE_CREATED: 'fleet.vehicle.created',
+  FLEET_VEHICLE_UPDATED: 'fleet.vehicle.updated',
+  FLEET_CARD_ASSIGNED: 'fleet.card.assigned',
 };
 
 /**

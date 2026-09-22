@@ -28,6 +28,7 @@ const { createApiRouter } = require('./routes/api');
 const { createViewRouter } = require('./routes/views');
 const { createAuthRouter, createAccountRouter } = require('./routes/auth');
 const { createUserRouter } = require('./routes/users');
+const { createFleetRouter } = require('./routes/fleet');
 const { createIngestRouter } = require('./routes/ingest');
 const MennekesClient = require('./services/mennekesClient');
 const MennekesModbusClient = require('./services/mennekesModbusClient');
@@ -161,6 +162,7 @@ function createApp(deps = {}) {
 
   // ------------------------------------------------------------------ Routen
   app.use('/', createUserRouter());
+  app.use('/', createFleetRouter());
   app.use('/api', createApiRouter({ liveFeed, mennekesClient }));
   app.use('/', createViewRouter({ liveFeed }));
 

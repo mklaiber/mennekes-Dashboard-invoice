@@ -119,14 +119,43 @@ function createApiRouter({ liveFeed, mennekesClient }) {
    * POST /api/report/run - Abrechnung erzeugen.
    * Body: { year?, month?, sendMail?: boolean, to?: string[] }
    */
+  const SCOPE_KINDS = new Set(['all', 'company', 'vehicle', 'employee', 'unassigned']);
+
+  /**
+   * Liest den Geltungsbereich eines Berichts aus dem Request.
+   * Unbekannte Angaben werden abgewiesen statt still auf "alles" zu fallen -
+   * ein Tippfehler im Bereich duerfte sonst versehentlich den gesamten
+   * Fuhrpark an eine einzelne Firma schicken.
+   */
+  function parseScope(raw) {
+    if (!raw || !raw.kind) return { kind: 'all', id: null };
+    if (!SCOPE_KINDS.has(raw.kind)) {
+      throw Object.assign(new Error(`Unbekannter Geltungsbereich "${raw.kind}".`), {
+        status: 400, code: 'bad_request',
+      });
+    }
+    const needsId = raw.kind === 'company' || raw.kind === 'vehicle' || raw.kind === 'employee';
+    const id = raw.id === undefined || raw.id === null ? null : Number.parseInt(raw.id, 10);
+    if (needsId && (!Number.isInteger(id) || id < 1)) {
+      throw Object.assign(new Error('Für diesen Geltungsbereich fehlt eine gültige ID.'), {
+        status: 400, code: 'bad_request',
+      });
+    }
+    return { kind: raw.kind, id: needsId ? id : null };
+  }
+
   router.post('/report/run', requireRole('admin'), asyncHandler(async (req, res) => {
     const { year, month } = parsePeriod(req.body || {});
     const sendMail = req.body?.sendMail !== false;
     const to = Array.isArray(req.body?.to) && req.body.to.length > 0 ? req.body.to : undefined;
+    const scope = parseScope(req.body?.scope);
 
-    logger.info(`Manueller Report-Lauf angefordert: ${year}-${month} (Mailversand: ${sendMail}).`);
+    logger.info(
+      `Manueller Report-Lauf angefordert: ${year}-${month}, Bereich ${scope.kind}`
+      + `${scope.id ? ` #${scope.id}` : ''} (Mailversand: ${sendMail}).`
+    );
     const result = await runMonthlyReport({
-      year, month, sendMail, to,
+      year, month, sendMail, to, scope,
       client: mennekesClient,
       triggeredBy: `manual:${req.user.username}`,
     });
@@ -140,6 +169,7 @@ function createApiRouter({ liveFeed, mennekesClient }) {
 
     res.json({
       ok: true,
+      scope: result.report.scope,
       period: result.report.period,
       totals: result.report.totals,
       files: {

@@ -14,10 +14,14 @@ const { db, now } = require('../db');
  * @param {{periodKey:string, triggeredBy?:string}} params
  * @returns {number} ID des Laufs
  */
-function start({ periodKey, triggeredBy = '' }) {
+function start({ periodKey, triggeredBy = '', scope = null, scopeLabel = '' }) {
   const info = db().prepare(`
-    INSERT INTO report_runs (period_key, started_at, triggered_by) VALUES (?, ?, ?)
-  `).run(periodKey, now(), String(triggeredBy).slice(0, 64));
+    INSERT INTO report_runs (period_key, started_at, triggered_by, scope_kind, scope_id, scope_label)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    periodKey, now(), String(triggeredBy).slice(0, 64),
+    scope?.kind || 'all', scope?.id ?? null, String(scopeLabel).slice(0, 160)
+  );
   return Number(info.lastInsertRowid);
 }
 
@@ -67,7 +71,8 @@ function list(limit = 20) {
     SELECT id, period_key AS periodKey, started_at AS startedAt, finished_at AS finishedAt,
            ok, session_count AS sessionCount, energy_kwh AS energyKwh, cost,
            pdf_file AS pdfFile, csv_detail_file AS csvDetailFile, csv_summary_file AS csvSummaryFile,
-           mail_to AS mailTo, message_id AS messageId, error, triggered_by AS triggeredBy
+           mail_to AS mailTo, message_id AS messageId, error, triggered_by AS triggeredBy,
+           scope_kind AS scopeKind, scope_id AS scopeId, scope_label AS scopeLabel
       FROM report_runs ORDER BY started_at DESC LIMIT ?
   `).all(bounded).map((row) => ({ ...row, ok: Boolean(row.ok) }));
 }

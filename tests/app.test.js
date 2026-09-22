@@ -553,7 +553,9 @@ describe('Einstellungen über die API', () => {
       .expect(200);
 
     expect(response.body.settings.rfidMappings).toEqual([
-      { rfid: 'deadbeef', rfidRaw: 'DEADBEEF', name: 'Neuer Fahrer', plate: 'B-EV 9', billable: false },
+      // vehicleId gehoert seit der Fuhrpark-Verwaltung dazu: die Karte ist
+      // hier noch keinem Fahrzeug zugeordnet.
+      { rfid: 'deadbeef', rfidRaw: 'DEADBEEF', name: 'Neuer Fahrer', plate: 'B-EV 9', billable: false, vehicleId: null },
     ]);
   });
 

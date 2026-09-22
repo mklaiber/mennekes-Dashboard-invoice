@@ -39,6 +39,9 @@
     <a href="/einstellungen" class="md-tab" <%= active === 'settings' ? 'aria-current="page"' : '' %>>
       <%- include('icon', { name: 'settings', size: 18 }) %> Einstellungen
     </a>
+    <a href="/fuhrpark" class="md-tab" <%= active === 'fleet' ? 'aria-current="page"' : '' %>>
+      <%- include('icon', { name: 'ev', size: 18 }) %> Fuhrpark
+    </a>
     <a href="/benutzer" class="md-tab" <%= active === 'users' ? 'aria-current="page"' : '' %>>
       <%- include('icon', { name: 'people', size: 18 }) %> Benutzer
     </a>

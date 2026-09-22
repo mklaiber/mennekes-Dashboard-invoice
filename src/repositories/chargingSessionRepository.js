@@ -11,6 +11,7 @@
 
 const { db, now, transaction } = require('../db');
 const logger = require('../utils/logger');
+const fleet = require('./fleetRepository');
 
 /** Wandelt eine Datenbankzeile in das Format, das die Abrechnung erwartet. */
 function toSession(row) {
@@ -24,6 +25,15 @@ function toSession(row) {
     rfidRaw: row.rfidRaw || null,
     meterStartKwh: row.meterStartKwh,
     meterEndKwh: row.meterEndKwh,
+    // Beim Eintreffen eingefrorene Zuordnung. Klartext und ID: die ID fuer
+    // Filter und Verknuepfung, der Klartext, damit ein geloeschter
+    // Stammdatensatz eine alte Rechnung nicht unleserlich macht.
+    vehicleId: row.vehicleId ?? null,
+    companyId: row.companyId ?? null,
+    employeeId: row.employeeId ?? null,
+    vehiclePlate: row.vehiclePlate || '',
+    companyName: row.companyName || '',
+    employeeName: row.employeeName || '',
   };
 }
 
@@ -31,7 +41,9 @@ const SELECT_COLUMNS = `
   id, start_at AS startAt, end_at AS endAt, duration_seconds AS durationSeconds,
   energy_kwh AS energyKwh, rfid, rfid_raw AS rfidRaw,
   meter_start_kwh AS meterStartKwh, meter_end_kwh AS meterEndKwh,
-  source, received_at AS receivedAt
+  source, received_at AS receivedAt,
+  vehicle_id AS vehicleId, company_id AS companyId, employee_id AS employeeId,
+  vehicle_plate AS vehiclePlate, company_name AS companyName, employee_name AS employeeName
 `;
 
 /**
@@ -64,13 +76,26 @@ function upsertMany(sessions, options = {}) {
 
   if (valid.length > 0) {
     const exists = db().prepare('SELECT 1 FROM charging_sessions WHERE id = ?');
+    // Die Zuordnung wird beim Eintreffen aufgeloest und auf dem Datensatz
+    // festgeschrieben - IDs und Klartext. Wuerde sie stattdessen beim
+    // Abrechnen nachgeschlagen, aenderte jede spaetere Umbuchung rueckwirkend
+    // bereits gestellte Rechnungen, und eine geloeschte Firma zerlegte den
+    // Vorjahresbeleg.
+    //
+    // Beim erneuten Senden desselben Vorgangs bleibt eine bereits gesetzte
+    // Zuordnung unangetastet (COALESCE/CASE unten). Eine noch LEERE wird
+    // dagegen nachgetragen: war die Karte bei der ersten Lieferung noch
+    // keinem Fahrzeug zugeordnet und ist sie es inzwischen, profitiert der
+    // Vorgang davon, ohne dass jemand von Hand nacharbeiten muss.
     const upsert = db().prepare(`
       INSERT INTO charging_sessions
         (id, start_at, end_at, duration_seconds, energy_kwh, rfid, rfid_raw,
-         meter_start_kwh, meter_end_kwh, source, received_at, payload)
+         meter_start_kwh, meter_end_kwh, source, received_at, payload,
+         vehicle_id, company_id, employee_id, vehicle_plate, company_name, employee_name)
       VALUES
         (@id, @startAt, @endAt, @durationSeconds, @energyKwh, @rfid, @rfidRaw,
-         @meterStartKwh, @meterEndKwh, @source, @receivedAt, @payload)
+         @meterStartKwh, @meterEndKwh, @source, @receivedAt, @payload,
+         @vehicleId, @companyId, @employeeId, @vehiclePlate, @companyName, @employeeName)
       ON CONFLICT(id) DO UPDATE SET
         start_at         = excluded.start_at,
         end_at           = excluded.end_at,
@@ -81,7 +106,16 @@ function upsertMany(sessions, options = {}) {
         meter_start_kwh  = excluded.meter_start_kwh,
         meter_end_kwh    = excluded.meter_end_kwh,
         received_at      = excluded.received_at,
-        payload          = excluded.payload
+        payload          = excluded.payload,
+        vehicle_id    = COALESCE(charging_sessions.vehicle_id,  excluded.vehicle_id),
+        company_id    = COALESCE(charging_sessions.company_id,  excluded.company_id),
+        employee_id   = COALESCE(charging_sessions.employee_id, excluded.employee_id),
+        vehicle_plate = CASE WHEN charging_sessions.vehicle_id IS NULL
+                             THEN excluded.vehicle_plate ELSE charging_sessions.vehicle_plate END,
+        company_name  = CASE WHEN charging_sessions.vehicle_id IS NULL
+                             THEN excluded.company_name  ELSE charging_sessions.company_name  END,
+        employee_name = CASE WHEN charging_sessions.vehicle_id IS NULL
+                             THEN excluded.employee_name ELSE charging_sessions.employee_name END
     `);
 
     transaction(() => {
@@ -90,13 +124,17 @@ function upsertMany(sessions, options = {}) {
         if (exists.get(session.id)) updated += 1;
         else inserted += 1;
 
+        const rfid = String(session.rfid || 'unbekannt');
+        const attribution = fleet.resolveAttribution(rfid);
+
         upsert.run({
+          ...attribution,
           id: String(session.id),
           startAt: new Date(session.start).toISOString(),
           endAt: session.end ? new Date(session.end).toISOString() : null,
           durationSeconds: Math.max(0, Math.round(Number(session.durationSeconds) || 0)),
           energyKwh: Number(session.energyKwh),
-          rfid: String(session.rfid || 'unbekannt'),
+          rfid,
           rfidRaw: String(session.rfidRaw || ''),
           meterStartKwh: session.meterStartKwh ?? null,
           meterEndKwh: session.meterEndKwh ?? null,
