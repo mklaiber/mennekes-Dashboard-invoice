@@ -257,9 +257,13 @@ a:hover { text-decoration: underline; }
   color: var(--md-on-primary-container);
 }
 
-.md-topbar__titles { min-width: 0; }
-.md-topbar__title { font-size: 16px; font-weight: 500; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.md-topbar__subtitle { font-size: 12px; color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* display:block ist hier nicht kosmetisch: beide sind <span>, und bei einem
+   inline-Element wirken weder overflow:hidden noch text-overflow. Ohne das
+   laeuft "MENNEKES Wallbox" auf schmalen Schirmen aus seinem Kasten heraus
+   und unter die Knoepfe rechts daneben. */
+.md-topbar__titles { min-width: 0; display: block; }
+.md-topbar__title { display: block; font-size: 16px; font-weight: 500; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-topbar__subtitle { display: block; font-size: 12px; color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ------------------------------------------------------------- Navigation */
 .md-tabs {
@@ -631,4 +635,78 @@ a:hover { text-decoration: underline; }
   .md-topbar, .md-tabs, .md-snackbar, .md-dialog, .md-btn, .md-icon-btn { display: none !important; }
   body { background: #fff; color: #000; }
   .md-card { break-inside: avoid; border: 1px solid #ccc; }
+}
+
+/* ===========================================================================
+   Schmale Schirme
+   ===========================================================================
+   Gemessen bei 375px: die Kopfzeile lief ueber, die Navigationsreiter ragten
+   bis 650px hinaus, und in den Tabellen lag die eigentliche Aktion - etwa das
+   Zuordnen einer Ladekarte - ausserhalb des Sichtfelds hinter waagerechtem
+   Scrollen. Wer aufs Handy schaut, sah drei Spalten und keinen Knopf.
+   =========================================================================== */
+
+@media (max-width: 719px) {
+  /* Der Name des Angemeldeten kostet auf 375px ein Drittel der Kopfzeile.
+     Das Schildsymbol allein sagt dasselbe; der volle Text bleibt im title. */
+  .md-topbar .md-chip--primary span:not([class]) { display: none; }
+  .md-topbar .md-chip--primary { padding-inline: 10px; }
+
+  /* Fuenf Reiter passen nicht nebeneinander. Sie scrollen weiterhin, aber
+     kompakter - damit ist der vierte statt des dritten schon sichtbar. */
+  .md-tab { padding-inline: 12px; gap: 6px; font-size: 14px; }
+  .md-tabs { padding-inline: 8px; }
+
+  /* Tabellen als Karten: jede Zeile wird ein Block, jede Zelle bekommt ihre
+     Spaltenueberschrift als Beschriftung davor. Voraussetzung ist ein
+     data-label an der Zelle - ohne das bleibt die Tabelle eine Tabelle. */
+  .md-table--stack thead { display: none; }
+  .md-table--stack,
+  .md-table--stack tbody,
+  .md-table--stack tr,
+  .md-table--stack td { display: block; width: 100%; }
+
+  .md-table--stack tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--md-outline-variant);
+  }
+  .md-table--stack tr:last-child { border-bottom: none; }
+
+  /* Beschriftung ueber dem Wert, nicht daneben. Nebeneinander waere ein
+     Raster, und darin wird JEDES Kind der Zelle zu einer eigenen Zelle:
+     ein zweites Element - etwa ein Chip unter der Karten-ID - landete dann
+     in der Beschriftungsspalte statt unter seinem Wert. Ausserdem bleibt so
+     auf 375px mehr Breite fuer den Inhalt. */
+  .md-table--stack td {
+    border: none;
+    padding: 6px 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+  }
+
+  .md-table--stack td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 100%;
+    font-size: 12px;
+    color: var(--md-on-surface-variant);
+  }
+
+  /* Der Rahmen darf hier nicht mehr scrollen, sonst waere nichts gewonnen. */
+  .md-table-wrap:has(.md-table--stack) { overflow-x: visible; }
+}
+
+/* Fingerbedienung: 40x40 ist mit der Maus bequem und mit dem Daumen zu klein.
+   Gilt unabhaengig von der Breite - ein Tablet mit Stift zaehlt auch dazu. */
+@media (pointer: coarse) {
+  .md-icon-btn { width: 44px; height: 44px; }
+  .md-btn { min-height: 44px; }
+  .md-field__select, .md-field__input { min-height: 44px; }
+
+  /* Ein natives Kontrollkaestchen misst 13x13. Es sitzt zwar in einem
+     klickbaren Label, aber wer genau darauf zielt, trifft daneben. Das
+     Kaestchen waechst, und die Zeile bekommt Daumenhoehe. */
+  input[type="checkbox"] { width: 20px; height: 20px; }
+  label:has(> input[type="checkbox"]) { min-height: 44px; }
 }

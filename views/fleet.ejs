@@ -21,55 +21,96 @@
     </span>
   </div>
 
-  <!-- ============================================ Nicht zugeordnete Karten -->
-  <% if (unassignedCards.length > 0) { %>
-    <section class="md-card" style="margin-bottom:24px">
-      <h2 class="md-title-m" style="margin:0 0 4px">
-        <%- include('partials/icon', { name: 'warning', size: 18 }) %>
-        Nicht zugeordnete Karten
-      </h2>
-      <p class="md-body-s md-on-surface-variant" style="margin:0 0 16px">
-        Diese Karten sind in Ladevorgängen aufgetaucht, gehören aber zu keinem Fahrzeug.
-        Solange das so bleibt, erscheinen ihre Ladevorgänge in keiner Firmenrechnung.
-      </p>
+  <!-- ========================================================= Ladekarten -->
+  <%
+    var offeneKarten = cards.filter(function (c) { return !c.assigned; });
+  %>
+  <section class="md-card" style="margin-bottom:24px">
+    <div class="md-row" style="margin-bottom:4px">
+      <h2 class="md-title-m" style="margin:0">Ladekarten</h2>
+      <% if (offeneKarten.length > 0) { %>
+        <span class="md-chip"><%= offeneKarten.length %> ohne Fahrzeug</span>
+      <% } %>
+    </div>
+    <p class="md-body-s md-on-surface-variant" style="margin:0 0 16px">
+      Jede Karte gehört zu einem Fahrzeug. Karten ohne Zuordnung stehen oben – ihre
+      Ladevorgänge erscheinen in keiner Firmenrechnung, solange das so bleibt.
+      Neue Karten musst du nicht anlegen: sie tauchen hier auf, sobald damit geladen wurde.
+    </p>
 
+    <% if (cards.length === 0) { %>
+      <p class="md-body-m md-on-surface-variant">
+        Noch keine Karte gesehen. Sobald der Connector den ersten Ladevorgang liefert,
+        erscheint sie hier.
+      </p>
+    <% } else { %>
       <div class="md-table-wrap">
-        <table class="md-table">
-          <caption class="sr-only">Karten ohne Fahrzeugzuordnung</caption>
+        <table class="md-table md-table--stack">
+          <caption class="sr-only">Ladekarten mit Fahrzeug und Aktivität</caption>
           <thead>
             <tr>
               <th scope="col">Karte</th>
-              <th scope="col">Ladevorgänge</th>
-              <th scope="col">Energie</th>
-              <th scope="col">Zuletzt</th>
-              <th scope="col">Fahrzeug zuordnen</th>
+              <th scope="col">Fahrzeug</th>
+              <th scope="col">Aktivität</th>
+              <th scope="col">Abrechenbar</th>
+              <th scope="col"><span class="sr-only">Aktionen</span></th>
             </tr>
           </thead>
           <tbody>
-            <% unassignedCards.forEach(function (card) { %>
-              <tr data-card="<%= card.rfid %>">
-                <td>
+            <% cards.forEach(function (card) { %>
+              <tr data-card="<%= card.rfid %>" data-open="<%= card.openSessionCount %>">
+                <td data-label="Karte">
                   <div class="md-mono"><%= card.rfid %></div>
-                  <% if (!card.known) { %>
-                    <span class="md-chip">unbekannt</span>
+                  <% if (!card.assigned) { %>
+                    <span class="md-chip">ohne Fahrzeug</span>
                   <% } %>
                 </td>
-                <td><%= card.sessionCount %></td>
-                <td><%= card.energyKwh %> kWh</td>
-                <td class="md-body-s"><%= new Date(card.lastSeenAt).toLocaleDateString('de-DE') %></td>
+
+                <td data-label="Fahrzeug">
+                  <select class="md-field__select" data-assign-vehicle
+                          aria-label="Fahrzeug für Karte <%= card.rfid %>">
+                    <option value="" <%= card.assigned ? '' : 'selected' %>>– keins –</option>
+                    <% vehicles.filter(function (v) { return v.active; }).forEach(function (vehicle) { %>
+                      <option value="<%= vehicle.id %>" <%= card.vehicleId === vehicle.id ? 'selected' : '' %>>
+                        <%= vehicle.plate %><%= vehicle.employeeName ? ' · ' + vehicle.employeeName : '' %>
+                      </option>
+                    <% }); %>
+                  </select>
+                  <% if (card.assigned && card.companyName) { %>
+                    <div class="md-body-s md-on-surface-variant" style="margin-top:4px"><%= card.companyName %></div>
+                  <% } %>
+                </td>
+
+                <td data-label="Aktivität">
+                  <% if (card.sessionCount > 0) { %>
+                    <div class="md-body-s">
+                      <%= card.sessionCount %> Vorgang/Vorgänge · <%= card.energyKwh %> kWh
+                    </div>
+                    <div class="md-body-s md-on-surface-variant">
+                      zuletzt <%= new Date(card.lastSeenAt).toLocaleDateString('de-DE') %>
+                    </div>
+                  <% } else { %>
+                    <span class="md-body-s md-on-surface-variant">noch nicht benutzt</span>
+                  <% } %>
+                </td>
+
+                <td data-label="Abrechenbar">
+                  <label class="md-switch">
+                    <input type="checkbox" data-billable <%= card.billable ? 'checked' : '' %>
+                           aria-label="Karte <%= card.rfid %> abrechnen">
+                    <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+                  </label>
+                </td>
+
                 <td>
-                  <div class="md-row" style="gap:8px;align-items:center">
-                    <select class="md-field__select" data-assign-vehicle style="min-width:220px" aria-label="Fahrzeug für <%= card.rfid %>">
-                      <option value="">– wählen –</option>
-                      <% vehicles.filter(function (v) { return v.active; }).forEach(function (vehicle) { %>
-                        <option value="<%= vehicle.id %>"><%= vehicle.plate %><%= vehicle.employeeName ? ' · ' + vehicle.employeeName : '' %></option>
-                      <% }); %>
-                    </select>
-                    <label class="md-body-s" style="display:flex;gap:4px;align-items:center;white-space:nowrap">
-                      <input type="checkbox" data-assign-backfill checked>
-                      <%= card.sessionCount %> rückwirkend
-                    </label>
-                    <button type="button" class="md-btn md-btn--tonal" data-assign-submit>Zuordnen</button>
+                  <div class="md-row" style="gap:12px;align-items:center;flex-wrap:wrap">
+                    <% if (card.openSessionCount > 0) { %>
+                      <label class="md-body-s" style="display:flex;gap:6px;align-items:center">
+                        <input type="checkbox" data-assign-backfill checked>
+                        <%= card.openSessionCount %> rückwirkend
+                      </label>
+                    <% } %>
+                    <button type="button" class="md-btn md-btn--tonal" data-assign-submit>Übernehmen</button>
                   </div>
                 </td>
               </tr>
@@ -77,8 +118,8 @@
           </tbody>
         </table>
       </div>
-    </section>
-  <% } %>
+    <% } %>
+  </section>
 
   <!-- ========================================================== Fahrzeuge -->
   <section class="md-card" style="margin-bottom:24px">
@@ -91,7 +132,7 @@
     </div>
 
     <div class="md-table-wrap">
-      <table class="md-table">
+      <table class="md-table md-table--stack">
         <caption class="sr-only">Fahrzeuge des Fuhrparks</caption>
         <thead>
           <tr>
@@ -109,19 +150,19 @@
           <% } %>
           <% vehicles.forEach(function (vehicle) { %>
             <tr data-vehicle='<%- JSON.stringify({ id: vehicle.id, plate: vehicle.plate, label: vehicle.label, companyId: vehicle.companyId, employeeName: vehicle.employeeName, notes: vehicle.notes, active: vehicle.active }) %>'>
-              <td>
+              <td data-label="Kennzeichen">
                 <div class="md-label-l"><%= vehicle.plate %></div>
                 <% if (vehicle.label) { %><div class="md-body-s md-on-surface-variant"><%= vehicle.label %></div><% } %>
               </td>
-              <td>
+              <td data-label="Firma">
                 <% if (vehicle.isPrivate) { %>
                   <span class="md-chip">privat</span>
                 <% } else { %>
                   <%= vehicle.companyName %>
                 <% } %>
               </td>
-              <td><%= vehicle.employeeName || '–' %></td>
-              <td>
+              <td data-label="Mitarbeiter"><%= vehicle.employeeName || '–' %></td>
+              <td data-label="Karten">
                 <% if (vehicle.cards.length === 0) { %>
                   <span class="md-body-s md-on-surface-variant">keine</span>
                 <% } %>
@@ -129,7 +170,7 @@
                   <span class="md-chip md-mono" title="<%= card.rfidRaw %>"><%= card.rfid %></span>
                 <% }); %>
               </td>
-              <td>
+              <td data-label="Status">
                 <span class="md-chip <%= vehicle.active ? 'md-chip--primary' : '' %>">
                   <%= vehicle.active ? 'aktiv' : 'stillgelegt' %>
                 </span>
@@ -161,7 +202,7 @@
     </div>
 
     <div class="md-table-wrap">
-      <table class="md-table">
+      <table class="md-table md-table--stack">
         <caption class="sr-only">Firmen</caption>
         <thead>
           <tr>
@@ -175,7 +216,7 @@
         <tbody>
           <% companies.forEach(function (company) { %>
             <tr data-company='<%- JSON.stringify({ id: company.id, name: company.name, kind: company.kind, address: company.address, contactEmail: company.contactEmail, pricePerKwh: company.pricePerKwh, ownReport: company.ownReport, active: company.active }) %>'>
-              <td>
+              <td data-label="Name">
                 <div class="md-label-l"><%= company.name %></div>
                 <% if (!company.active) { %><span class="md-chip">stillgelegt</span><% } %>
                 <%# Eine Firma ohne Auto ist hier ein Versehen: abgerechnet
@@ -186,8 +227,8 @@
                   <span class="md-chip" title="Ohne Fahrzeug gibt es für diese Firma nichts abzurechnen">keine Fahrzeuge</span>
                 <% } %>
               </td>
-              <td class="md-body-s"><%= company.contactEmail || '–' %></td>
-              <td>
+              <td class="md-body-s" data-label="Kontakt"><%= company.contactEmail || '–' %></td>
+              <td data-label="Arbeitspreis">
                 <% if (company.pricePerKwh === null) { %>
                   <span class="md-body-s md-on-surface-variant">global</span>
                 <% } else { %>
@@ -197,7 +238,7 @@
                   <%= company.pricePerKwh.toFixed(3).replace(/0$/, '').replace('.', ',') %> €/kWh
                 <% } %>
               </td>
-              <td>
+              <td data-label="Eigener Bericht">
                 <span class="md-chip <%= company.ownReport ? 'md-chip--primary' : '' %>">
                   <%= company.ownReport ? 'ja' : 'nein' %>
                 </span>

@@ -196,6 +196,91 @@ function updateVehicle(id, patch) {
   return findVehicle(id);
 }
 
+/**
+ * Alle bekannten Ladekarten mit ihrem Fahrzeug und ihrer Aktivitaet.
+ *
+ * Die Liste vereint zwei Quellen: eingetragene Zuordnungen und Karten, die
+ * bisher nur in Ladevorgaengen aufgetaucht sind. Frueher standen diese
+ * getrennt - bekannte Karten in den Einstellungen, unbekannte im Fuhrpark -
+ * und man musste zwischen zwei Seiten wechseln, um eine Karte umzubuchen.
+ *
+ * `openSessionCount` ist die Zahl der Ladevorgaenge dieser Karte OHNE
+ * Zuordnung: genau die, die eine rueckwirkende Uebernahme betreffen wuerde.
+ *
+ * @returns {Array<object>} nicht zugeordnete Karten zuerst
+ */
+function listCards() {
+  return db().prepare(`
+    SELECT c.rfid,
+           MAX(c.rfidRaw)                AS rfidRaw,
+           -- COALESCE, nicht blosses MAX: der Ladevorgang-Zweig unten steuert
+           -- NULL bei, damit er die Einstellung der Karte nicht ueberstimmt.
+           -- Eine Karte, die es nur als Ladevorgang gibt, gilt als abrechenbar.
+           COALESCE(MAX(c.billable), 1)  AS billable,
+           MAX(c.known)                  AS known,
+           MAX(c.vehicleId)              AS vehicleId,
+           MAX(c.plate)                  AS vehiclePlate,
+           MAX(c.employeeName)           AS employeeName,
+           MAX(c.companyName)            AS companyName,
+           COALESCE(SUM(c.isSession), 0) AS sessionCount,
+           ROUND(COALESCE(SUM(c.kwh), 0), 3) AS energyKwh,
+           MAX(c.startAt)                AS lastSeenAt,
+           COALESCE(SUM(c.isOpen), 0)    AS openSessionCount
+      FROM (
+        SELECT m.rfid, m.rfid_raw AS rfidRaw, m.billable, 1 AS known,
+               v.id AS vehicleId, v.plate, v.employee_name AS employeeName,
+               co.name AS companyName,
+               0 AS isSession, 0 AS kwh, NULL AS startAt, 0 AS isOpen
+          FROM rfid_mappings m
+          LEFT JOIN vehicles  v  ON v.id = m.vehicle_id
+          LEFT JOIN companies co ON co.id = v.company_id
+        UNION ALL
+        SELECT s.rfid, s.rfid_raw, NULL, 0,
+               NULL, NULL, NULL, NULL,
+               1, s.energy_kwh, s.start_at,
+               CASE WHEN s.vehicle_id IS NULL THEN 1 ELSE 0 END
+          FROM charging_sessions s
+      ) c
+     GROUP BY c.rfid
+     ORDER BY (MAX(c.vehicleId) IS NOT NULL), c.rfid
+  `).all().map((row) => ({
+    ...row,
+    billable: Boolean(row.billable),
+    known: Boolean(row.known),
+    assigned: row.vehicleId !== null,
+    vehiclePlate: row.vehiclePlate || '',
+    employeeName: row.employeeName || '',
+    companyName: row.companyName || '',
+  }));
+}
+
+/**
+ * Schaltet, ob eine Karte abgerechnet wird.
+ *
+ * Nicht abrechenbar heisst: der Ladevorgang bleibt sichtbar und zaehlt zur
+ * Energie, taucht aber nicht in der Kostensumme auf - etwa ein Besuchsauto,
+ * das der Arbeitgeber nicht erstattet.
+ *
+ * @param {string} rfid
+ * @param {boolean} billable
+ * @returns {boolean} true, wenn die Karte existierte
+ */
+function setCardBillable(rfid, billable) {
+  const result = db().prepare(
+    'UPDATE rfid_mappings SET billable = ?, updated_at = ? WHERE rfid = ?'
+  ).run(billable ? 1 : 0, now(), rfid);
+
+  if (result.changes === 0) {
+    // Karte war bisher nur in Ladevorgaengen sichtbar.
+    const ts = now();
+    db().prepare(`
+      INSERT INTO rfid_mappings (rfid, rfid_raw, name, plate, billable, vehicle_id, created_at, updated_at)
+      VALUES (@rfid, @rfid, '', '', @billable, NULL, @ts, @ts)
+    `).run({ rfid, billable: billable ? 1 : 0, ts });
+  }
+  return true;
+}
+
 // ------------------------------------------------------- Karten zuordnen
 
 /**
@@ -314,5 +399,6 @@ function resolveAttribution(rfid) {
 module.exports = {
   listCompanies, findCompany, createCompany, updateCompany,
   listVehicles, findVehicle, createVehicle, updateVehicle,
-  cardsByVehicle, listUnassignedCards, assignCardToVehicle, resolveAttribution,
+  cardsByVehicle, listCards, listUnassignedCards, assignCardToVehicle, resolveAttribution,
+  setCardBillable,
 };

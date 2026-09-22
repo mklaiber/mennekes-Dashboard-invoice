@@ -33,7 +33,9 @@ function normalizeRfid(rfid) {
 function defaultSettings() {
   return {
     wallbox: {
-      baseUrl: config.mennekes.baseUrl,
+      // Nur der Anzeigename. Die Adresse der Wallbox ist keine Einstellung
+      // mehr: im Connector-Betrieb ist das Geraet von hier aus gar nicht
+      // erreichbar, und im Direktbetrieb kommt sie aus der Umgebung.
       displayName: 'MENNEKES Wallbox',
     },
     billing: {
@@ -41,9 +43,9 @@ function defaultSettings() {
       currency: config.billing.currency,
       locale: config.billing.locale,
       timezone: config.billing.timezone,
-      companyName: config.billing.companyName,
-      employeeName: config.billing.employeeName,
-      vehiclePlate: config.billing.vehiclePlate,
+      // Arbeitgeber, Mitarbeiter und Kennzeichen stehen am Fahrzeug bzw. an
+      // der Firma - siehe Fuhrpark. Global gaebe es sie nur einmal, und
+      // genau das war die Beschraenkung, die der Fuhrpark aufhebt.
       logoUrl: config.billing.logoUrl || '',
       footerNote:
         'Erstellt gemäß der Regelung zur Abrechnung dienstlicher Ladevorgänge am privaten Hausanschluss.',

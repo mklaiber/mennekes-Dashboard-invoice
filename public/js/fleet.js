@@ -100,32 +100,57 @@
     });
   });
 
+  /* -------------------------------------------------------- Ladekarten */
+
   document.querySelectorAll('[data-assign-submit]').forEach(function (button) {
     button.addEventListener('click', function () {
       var row = button.closest('tr');
       var rfid = row.getAttribute('data-card');
-      var vehicleId = row.querySelector('[data-assign-vehicle]').value;
-      var backfill = row.querySelector('[data-assign-backfill]').checked;
-
-      if (!vehicleId) {
-        window.md.snackbar('Bitte zuerst ein Fahrzeug wählen.');
-        return;
-      }
+      var auswahl = row.querySelector('[data-assign-vehicle]');
+      var vehicleId = auswahl.value ? Number(auswahl.value) : null;
+      var rueckwirkend = row.querySelector('[data-assign-backfill]');
 
       button.disabled = true;
       window.md.request('/api/fleet/cards/' + encodeURIComponent(rfid) + '/assign', {
         method: 'POST',
-        body: { vehicleId: Number(vehicleId), backfill: backfill },
+        body: {
+          vehicleId: vehicleId,
+          backfill: Boolean(rueckwirkend && rueckwirkend.checked),
+        },
       }).then(function (result) {
         window.md.snackbar(
-          result.backfilled
-            ? 'Karte zugeordnet, ' + result.backfilled + ' Ladevorgang/Ladevorgänge übernommen.'
-            : 'Karte zugeordnet.'
+          vehicleId === null
+            ? 'Zuordnung gelöst.'
+            : (result.backfilled
+              ? 'Karte übernommen, ' + result.backfilled + ' Ladevorgang/Ladevorgänge zugeordnet.'
+              : 'Karte übernommen.')
         );
         window.location.reload();
       }).catch(function (error) {
         window.md.snackbar(error.message);
         button.disabled = false;
+      });
+    });
+  });
+
+  // Der Schalter wirkt sofort - ein zusaetzliches "Speichern" fuer eine
+  // einzelne Ja-Nein-Entscheidung waere nur ein weiterer Klick.
+  document.querySelectorAll('[data-billable]').forEach(function (schalter) {
+    schalter.addEventListener('change', function () {
+      var rfid = schalter.closest('tr').getAttribute('data-card');
+      schalter.disabled = true;
+
+      window.md.request('/api/fleet/cards/' + encodeURIComponent(rfid), {
+        method: 'PUT',
+        body: { billable: schalter.checked },
+      }).then(function () {
+        window.md.snackbar(schalter.checked ? 'Karte wird abgerechnet.' : 'Karte wird nicht abgerechnet.');
+        schalter.disabled = false;
+      }).catch(function (error) {
+        // Zurueckdrehen, damit der Schalter nicht etwas anderes zeigt als gilt.
+        schalter.checked = !schalter.checked;
+        schalter.disabled = false;
+        window.md.snackbar(error.message);
       });
     });
   });

@@ -49,9 +49,6 @@ function makeSettings(overrides = {}) {
     wallbox: { ...base.wallbox, displayName: 'AMTRON Professional' },
     billing: {
       ...base.billing,
-      employeeName: 'Max Mustermann',
-      companyName: 'ACME GmbH',
-      vehiclePlate: 'M-EV 1234',
       ...overrides.billing,
     },
     ...overrides,
@@ -80,9 +77,10 @@ describe('renderHtml', () => {
     expect(html).toContain('März 2026');
     expect(html).toContain('01.03.2026');
     expect(html).toContain('31.03.2026');
-    expect(html).toContain('Max Mustermann');
-    expect(html).toContain('ACME GmbH');
-    expect(html).toContain('M-EV 1234');
+    // Der Anzeigename der Wallbox ist die einzige Stammangabe, die noch aus
+    // den Einstellungen kommt. Arbeitgeber und Anschrift stehen im Bericht,
+    // je nachdem fuer welche Firma er gilt.
+    expect(html).toContain('AMTRON Professional');
   });
 
   it('enthält eine Tabellenzeile je Ladekarte', async () => {
@@ -428,5 +426,33 @@ describe('Fuhrpark in der PDF-Vorlage', () => {
     expect(eine).not.toContain('Zusammenfassung je Firma');
     expect(eine).toContain('TUT-MK-100');
     expect(eine).not.toContain('TUT-SK-200');
+  });
+});
+
+describe('Kopf eines Firmenberichts', () => {
+  it('trägt die Firma des Geltungsbereichs, nicht eine globale Voreinstellung', async () => {
+    const report = buildMonthlyReport({
+      sessions: [], year: 2026, month: 3, pricePerKwh: 0.3, timezone: 'Europe/Berlin',
+      meta: { companyName: 'Kapphan & Partner PartG', companyAddress: 'Musterweg 1, 78532 Tuttlingen' },
+    });
+
+    const html = await pdfService.renderHtml(report, makeSettings());
+
+    expect(html).toContain('Kapphan &amp; Partner PartG');
+    expect(html).toContain('Musterweg 1');
+    expect(html).toContain('Arbeitgeber');
+  });
+
+  it('behauptet im Gesamtbericht keine Firma', async () => {
+    const report = buildMonthlyReport({
+      sessions: [], year: 2026, month: 3, pricePerKwh: 0.3, timezone: 'Europe/Berlin',
+    });
+
+    const html = await pdfService.renderHtml(report, makeSettings());
+
+    // Ohne Firmenbezug bleibt der Absender neutral, statt eine beliebige
+    // Firma in den Kopf zu setzen.
+    expect(html).toContain('Ladestrom-Abrechnung');
+    expect(html).not.toMatch(/<dt>Arbeitgeber<\/dt>/);
   });
 });

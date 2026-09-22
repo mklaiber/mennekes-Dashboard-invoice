@@ -226,11 +226,6 @@ function createApiRouter({ liveFeed, mennekesClient }) {
 
     if (body.wallbox) {
       patch.wallbox = {};
-      if (typeof body.wallbox.baseUrl === 'string') {
-        const url = body.wallbox.baseUrl.trim();
-        if (url && !/^https?:\/\//i.test(url)) throw badRequest('Wallbox-URL muss mit http:// oder https:// beginnen.');
-        patch.wallbox.baseUrl = url;
-      }
       if (typeof body.wallbox.displayName === 'string') {
         patch.wallbox.displayName = body.wallbox.displayName.trim().slice(0, 120);
       }
@@ -245,7 +240,7 @@ function createApiRouter({ liveFeed, mennekesClient }) {
         }
         patch.billing.pricePerKwh = price;
       }
-      for (const key of ['currency', 'locale', 'timezone', 'companyName', 'employeeName', 'vehiclePlate', 'logoUrl', 'footerNote']) {
+      for (const key of ['currency', 'locale', 'timezone', 'logoUrl', 'footerNote']) {
         if (typeof body.billing[key] === 'string') patch.billing[key] = body.billing[key].trim().slice(0, 500);
       }
       if (body.billing.margins && typeof body.billing.margins === 'object') {
@@ -293,16 +288,9 @@ function createApiRouter({ liveFeed, mennekesClient }) {
       }
     }
 
-    if (Array.isArray(body.rfidMappings)) {
-      patch.rfidMappings = body.rfidMappings
-        .filter((entry) => entry && typeof entry.rfid === 'string' && entry.rfid.trim())
-        .map((entry) => ({
-          rfid: String(entry.rfid).trim().slice(0, 64),
-          name: String(entry.name || '').trim().slice(0, 120),
-          plate: String(entry.plate || '').trim().slice(0, 32),
-          billable: entry.billable !== false,
-        }));
-    }
+    // Ladekarten werden hier NICHT mehr entgegengenommen: sie gehoeren zu
+    // einem Fahrzeug und werden im Fuhrpark gepflegt (/api/fleet/cards/...).
+    // Zwei Schreibwege auf dieselben Daten waeren eine Fehlerquelle.
 
     if (body.scheduler) {
       patch.scheduler = {};
@@ -316,7 +304,7 @@ function createApiRouter({ liveFeed, mennekesClient }) {
     const saved = settingsStore.save(patch, { userId: req.user.id });
 
     audit.log({
-      action: Array.isArray(body.rfidMappings) ? audit.ACTIONS.RFID_UPDATED : audit.ACTIONS.SETTINGS_UPDATED,
+      action: audit.ACTIONS.SETTINGS_UPDATED,
       user: req.user,
       detail: Object.keys(patch).join(', '),
       ip: req.ip,

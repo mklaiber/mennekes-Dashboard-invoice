@@ -106,7 +106,7 @@ describe('Kartenzuordnung über die API', () => {
       .expect(200);
 
     expect(response.body.backfilled).toBe(1);
-    expect(response.body.unassignedCards).toHaveLength(0);
+    expect(response.body.cards.filter((card) => !card.assigned)).toHaveLength(0);
   });
 
   it('lässt die Rückwirkung weg, wenn sie nicht angefordert wurde', async () => {
@@ -119,8 +119,11 @@ describe('Kartenzuordnung über die API', () => {
       .expect(200);
 
     expect(response.body.backfilled).toBe(0);
-    // Der Ladevorgang bleibt in der Arbeitsliste sichtbar.
-    expect(response.body.unassignedCards).toHaveLength(1);
+    // Die Karte haengt jetzt am Fahrzeug, ihr alter Ladevorgang aber nicht -
+    // er bleibt als offener Posten sichtbar.
+    const karte = response.body.cards.find((c) => c.rfid === 'zzzz9999');
+    expect(karte.assigned).toBe(true);
+    expect(karte.openSessionCount).toBe(1);
   });
 
   it('meldet ein unbekanntes Fahrzeug als 404 statt still zu scheitern', async () => {
@@ -131,11 +134,38 @@ describe('Kartenzuordnung über die API', () => {
       .expect(404);
   });
 
-  it('zeigt die nicht zugeordnete Karte auf der Seite an', async () => {
+  it('zeigt die Karte mitsamt Aktivität auf der Seite an', async () => {
     const page = await admin.agent.get('/fuhrpark').expect(200);
 
     expect(page.text).toContain('zzzz9999');
-    expect(page.text).toContain('Nicht zugeordnete Karten');
+    expect(page.text).toContain('Ladekarten');
+    expect(page.text).toContain('ohne Fahrzeug');
+  });
+
+  it('führt bekannte und bisher nur gesehene Karten in EINER Liste', async () => {
+    // Frueher standen sie an zwei Orten: bekannte in den Einstellungen,
+    // unbekannte im Fuhrpark. Wer eine Karte umbuchen wollte, musste die
+    // Seite wechseln.
+    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100' });
+    fleet.assignCardToVehicle('aaaa1111', vehicle.id);
+
+    const response = await admin.agent.get('/api/fleet').expect(200);
+    const rfids = response.body.cards.map((card) => card.rfid).sort();
+
+    expect(rfids).toEqual(['aaaa1111', 'zzzz9999']);
+    // Nicht zugeordnete zuerst: sie brauchen eine Entscheidung.
+    expect(response.body.cards[0].rfid).toBe('zzzz9999');
+  });
+
+  it('schaltet die Abrechenbarkeit einer Karte', async () => {
+    const response = await admin.agent
+      .put('/api/fleet/cards/zzzz9999')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ billable: false })
+      .expect(200);
+
+    const karte = response.body.cards.find((c) => c.rfid === 'zzzz9999');
+    expect(karte.billable).toBe(false);
   });
 });
 

@@ -301,10 +301,10 @@ describe('Authentifizierung', () => {
       await request(app)
         .put('/api/settings')
         .set('Authorization', basic())
-        .send({ billing: { companyName: 'Per Skript' } })
+        .send({ wallbox: { displayName: 'Per Skript' } })
         .expect(200);
 
-      expect(settingsStore.load({ force: true }).billing.companyName).toBe('Per Skript');
+      expect(settingsStore.load({ force: true }).wallbox.displayName).toBe('Per Skript');
     });
   });
 
@@ -365,7 +365,13 @@ describe('WebUI', () => {
   it('rendert die Einstellungen mit den gespeicherten Werten', async () => {
     const response = await admin.agent.get('/einstellungen').expect(200);
 
-    expect(response.text).toContain('RFID-Zuordnung');
+    // Die Kartenverwaltung ist in den Fuhrpark umgezogen - eine Karte gehoert
+    // zu einem Fahrzeug, und dort steht sie jetzt auch. Ebenso Arbeitgeber,
+    // Kennzeichen und Fahrer: global gaebe es sie nur einmal.
+    expect(response.text).not.toContain('RFID-Zuordnung');
+    expect(response.text).not.toContain('billing-vehiclePlate');
+    expect(response.text).not.toContain('wallbox-baseUrl');
+    expect(response.text).toContain('/fuhrpark');
     expect(response.text).toContain('buchhaltung@firma.de');
     expect(response.text).toContain('Europe/Berlin');
   });
@@ -524,7 +530,7 @@ describe('Einstellungen über die API', () => {
       .put('/api/settings')
       .set('X-CSRF-Token', admin.csrfToken)
       .send({
-        billing: { pricePerKwh: 0.42, companyName: 'Neue GmbH' },
+        billing: { pricePerKwh: 0.42, currency: 'CHF' },
         mail: { to: ['neu@firma.de', 'zweite@firma.de'] },
       })
       .expect(200);
@@ -532,7 +538,7 @@ describe('Einstellungen über die API', () => {
     expect(response.body.settings.billing.pricePerKwh).toBe(0.42);
     expect(response.body.settings.mail.to).toEqual(['neu@firma.de', 'zweite@firma.de']);
     // Persistenz prüfen: neu laden statt Cache.
-    expect(settingsStore.load({ force: true }).billing.companyName).toBe('Neue GmbH');
+    expect(settingsStore.load({ force: true }).billing.currency).toBe('CHF');
   });
 
   it('nimmt Empfänger auch als kommaseparierten String an', async () => {
@@ -545,28 +551,18 @@ describe('Einstellungen über die API', () => {
     expect(response.body.settings.mail.to).toEqual(['a@firma.de', 'b@firma.de']);
   });
 
-  it('speichert RFID-Zuordnungen', async () => {
+  it('nimmt keine Ladekarten mehr entgegen - die gehören in den Fuhrpark', async () => {
     const response = await admin.agent
       .put('/api/settings')
       .set('X-CSRF-Token', admin.csrfToken)
-      .send({ rfidMappings: [{ rfid: 'DEADBEEF', name: 'Neuer Fahrer', plate: 'B-EV 9', billable: false }] })
+      .send({ rfidMappings: [{ rfid: 'DEADBEEF', name: 'Neuer Fahrer' }] })
       .expect(200);
 
-    expect(response.body.settings.rfidMappings).toEqual([
-      // vehicleId gehoert seit der Fuhrpark-Verwaltung dazu: die Karte ist
-      // hier noch keinem Fahrzeug zugeordnet.
-      { rfid: 'deadbeef', rfidRaw: 'DEADBEEF', name: 'Neuer Fahrer', plate: 'B-EV 9', billable: false, vehicleId: null },
-    ]);
-  });
-
-  it('verwirft RFID-Einträge ohne ID', async () => {
-    const response = await admin.agent
-      .put('/api/settings')
-      .set('X-CSRF-Token', admin.csrfToken)
-      .send({ rfidMappings: [{ rfid: '', name: 'Leer' }, { rfid: 'OK01', name: 'Gut' }] })
-      .expect(200);
-
-    expect(response.body.settings.rfidMappings).toHaveLength(1);
+    // Stillschweigend ignoriert statt abgewiesen: das Feld ist schlicht nicht
+    // mehr Teil der Einstellungen, und zwei Schreibwege auf dieselben Daten
+    // waeren eine Fehlerquelle.
+    const angelegt = response.body.settings.rfidMappings.map((entry) => entry.rfid);
+    expect(angelegt).not.toContain('deadbeef');
   });
 
   it.each([
@@ -575,7 +571,6 @@ describe('Einstellungen über die API', () => {
     [{ billing: { pricePerKwh: 'teuer' } }, 'keine Zahl'],
     [{ billing: { timezone: 'Mars/Olympus' } }, 'unbekannte Zeitzone'],
     [{ mail: { to: ['keine-email'] } }, 'ungültige Adresse'],
-    [{ wallbox: { baseUrl: 'ftp://wallbox' } }, 'falsches Protokoll'],
   ])('weist ungültige Eingaben zurück (%#: %s)', async (payload) => {
     const response = await admin.agent
       .put('/api/settings')

@@ -69,7 +69,7 @@ async function buildReportForMonth({ year, month, client, settings, scope } = {}
   // wird gar nicht erst gebaut.
   const activeClient = sessionSource.isConnectorMode()
     ? null
-    : (client || new MennekesClient({ baseUrl: activeSettings.wallbox.baseUrl }));
+    : (client || new MennekesClient({ baseUrl: config.mennekes.baseUrl }));
 
   const sessions = await sessionSource.getSessions({
     from: period.start,
@@ -90,12 +90,11 @@ async function buildReportForMonth({ year, month, client, settings, scope } = {}
     locale: activeSettings.billing.locale,
     timezone,
     meta: {
-      // Bei einem Firmenbericht steht die Firma im Kopf, nicht die globale
-      // Voreinstellung - sonst traegt jede Rechnung denselben Absender.
-      companyName: company ? company.name : activeSettings.billing.companyName,
+      // Bei einem Firmenbericht steht die Firma im Kopf. Beim Gesamtbericht
+      // bleibt er leer, statt eine beliebige Firma zu behaupten - dort
+      // stehen mehrere nebeneinander, die Aufstellung weist sie einzeln aus.
+      companyName: company ? company.name : '',
       companyAddress: company ? company.address : '',
-      employeeName: activeSettings.billing.employeeName,
-      vehiclePlate: activeSettings.billing.vehiclePlate,
       wallbox: activeSettings.wallbox.displayName,
       scopeLabel: describeScope(activeScope, company),
     },

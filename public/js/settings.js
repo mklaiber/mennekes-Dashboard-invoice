@@ -8,80 +8,8 @@
 (function settingsPage() {
   'use strict';
 
-  var boot = {};
-  try {
-    boot = JSON.parse(document.getElementById('bootstrap-settings').textContent) || {};
-  } catch (error) {
-    boot = {};
-  }
-
   var $ = function (id) { return document.getElementById(id); };
   var esc = window.md.escapeHtml;
-  var mappings = Array.isArray(boot.rfidMappings) ? boot.rfidMappings.slice() : [];
-
-  /* -------------------------------------------------------- RFID-Tabelle */
-
-  function field(name, index, value, placeholder, extraClass) {
-    return '<input type="text" data-field="' + name + '" data-index="' + index + '"'
-      + ' value="' + esc(value) + '" placeholder="' + esc(placeholder) + '"'
-      + ' class="md-field__input ' + (extraClass || '') + '"'
-      + ' style="min-height:44px;padding:10px 12px">';
-  }
-
-  function renderMappings() {
-    var tbody = $('rfid-rows');
-    tbody.innerHTML = mappings.map(function (entry, index) {
-      return '<tr>'
-        + '<td>' + field('rfid', index, entry.rfidRaw || entry.rfid, 'z. B. 04A1B2C3', 'md-mono') + '</td>'
-        + '<td>' + field('name', index, entry.name, 'Max Mustermann', '') + '</td>'
-        + '<td>' + field('plate', index, entry.plate, 'M-AB 1234', '') + '</td>'
-        + '<td style="text-align:center">'
-        + '<label class="md-check" style="justify-content:center">'
-        + '<input type="checkbox" data-field="billable" data-index="' + index + '"'
-        + (entry.billable !== false ? ' checked' : '') + '>'
-        + '<span class="sr-only">Abrechenbar</span></label>'
-        + '</td>'
-        + '<td style="text-align:right">'
-        + '<button type="button" class="md-icon-btn" data-remove="' + index + '"'
-        + ' aria-label="Zuordnung entfernen" title="Entfernen"'
-        + ' style="color:var(--md-error)">'
-        + '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">'
-        + '<path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
-        + '</button></td>'
-        + '</tr>';
-    }).join('');
-
-    $('rfid-empty').classList.toggle('hidden', mappings.length > 0);
-  }
-
-  // Delegierte Listener - die Zeilen werden neu gerendert, direkte wären weg.
-  $('rfid-rows').addEventListener('input', function (event) {
-    var name = event.target.getAttribute('data-field');
-    var index = event.target.getAttribute('data-index');
-    if (!name || index === null || name === 'billable') return;
-    mappings[Number(index)][name === 'rfid' ? 'rfidRaw' : name] = event.target.value;
-    if (name === 'rfid') mappings[Number(index)].rfid = event.target.value;
-  });
-
-  $('rfid-rows').addEventListener('change', function (event) {
-    if (event.target.getAttribute('data-field') !== 'billable') return;
-    mappings[Number(event.target.getAttribute('data-index'))].billable = event.target.checked;
-  });
-
-  $('rfid-rows').addEventListener('click', function (event) {
-    var button = event.target.closest('[data-remove]');
-    if (!button) return;
-    mappings.splice(Number(button.getAttribute('data-remove')), 1);
-    renderMappings();
-  });
-
-  $('add-rfid').addEventListener('click', function () {
-    mappings.push({ rfid: '', rfidRaw: '', name: '', plate: '', billable: true });
-    renderMappings();
-    var inputs = $('rfid-rows').querySelectorAll('input[data-field="rfid"]');
-    if (inputs.length > 0) inputs[inputs.length - 1].focus();
-  });
-
   /* ------------------------------------------------------------ Speichern */
 
   function splitList(value) {
@@ -102,16 +30,12 @@
 
     var payload = {
       wallbox: {
-        baseUrl: $('wallbox-baseUrl').value.trim(),
         displayName: $('wallbox-displayName').value.trim(),
       },
       billing: {
         pricePerKwh: Number($('billing-pricePerKwh').value),
         currency: $('billing-currency').value.trim().toUpperCase(),
         timezone: $('billing-timezone').value.trim(),
-        employeeName: $('billing-employeeName').value.trim(),
-        companyName: $('billing-companyName').value.trim(),
-        vehiclePlate: $('billing-vehiclePlate').value.trim(),
         logoUrl: $('billing-logoUrl').value.trim(),
         margins: {
           top: intOr($('margin-top').value, 20),
@@ -126,9 +50,6 @@
         to: splitList($('mail-to').value),
         cc: splitList($('mail-cc').value),
       },
-      rfidMappings: mappings.filter(function (entry) {
-        return String(entry.rfidRaw || entry.rfid || '').trim() !== '';
-      }),
       scheduler: {
         enabled: $('scheduler-enabled').checked,
         runPolicy: $('scheduler-runPolicy').value,
@@ -210,6 +131,4 @@
         });
     });
   });
-
-  renderMappings();
 }());

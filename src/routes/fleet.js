@@ -69,8 +69,7 @@ function createFleetRouter() {
       active: 'fleet',
       companies: fleet.listCompanies({ includeInactive: true }),
       vehicles: fleet.listVehicles({ includeInactive: true }),
-      unassignedCards: fleet.listUnassignedCards(),
-      knownCards: settingsStore.listRfidMappings(),
+      cards: fleet.listCards(),
     });
   });
 
@@ -80,7 +79,7 @@ function createFleetRouter() {
     res.json({
       companies: fleet.listCompanies({ includeInactive: true }),
       vehicles: fleet.listVehicles({ includeInactive: true }),
-      unassignedCards: fleet.listUnassignedCards(),
+      cards: fleet.listCards(),
     });
   });
 
@@ -169,7 +168,23 @@ function createFleetRouter() {
       detail: `${rfid} -> ${vehicleId ?? 'gelöst'}${result.backfilled ? ` (${result.backfilled} rückwirkend)` : ''}`,
       ip: req.ip,
     });
-    res.json({ ...result, unassignedCards: fleet.listUnassignedCards() });
+    res.json({ ...result, cards: fleet.listCards() });
+  }));
+
+  router.put('/api/fleet/cards/:rfid', adminOnly, asyncHandler(async (req, res) => {
+    const rfid = settingsStore.normalizeRfid(String(req.params.rfid || ''));
+    if (!rfid) throw badRequest('Karten-ID fehlt.');
+
+    const billable = req.body?.billable === true || req.body?.billable === 'true';
+    fleet.setCardBillable(rfid, billable);
+
+    audit.log({
+      action: audit.ACTIONS.RFID_UPDATED,
+      user: req.user,
+      detail: `${rfid}: ${billable ? 'abrechenbar' : 'nicht abrechenbar'}`,
+      ip: req.ip,
+    });
+    res.json({ cards: fleet.listCards() });
   }));
 
   return router;

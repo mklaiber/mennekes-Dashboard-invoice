@@ -345,7 +345,7 @@
         <div class="logo-fallback">Logo</div>
       {{/if}}
       <div class="brand-text">
-        <div class="issuer">{{#if settings.billing.employeeName}}{{settings.billing.employeeName}}{{else}}Ladestrom-Abrechnung{{/if}}</div>
+        <div class="issuer">{{#if report.meta.companyName}}{{report.meta.companyName}}{{else}}Ladestrom-Abrechnung{{/if}}</div>
         <div class="sub">{{settings.wallbox.displayName}}</div>
       </div>
     </div>
@@ -370,9 +370,8 @@
     <div class="party">
       <h3>Stammdaten</h3>
       <dl>
-        {{#if settings.billing.employeeName}}<dt>Mitarbeiter</dt><dd>{{settings.billing.employeeName}}</dd>{{/if}}
-        {{#if settings.billing.companyName}}<dt>Arbeitgeber</dt><dd>{{settings.billing.companyName}}</dd>{{/if}}
-        {{#if settings.billing.vehiclePlate}}<dt>Kennzeichen</dt><dd>{{settings.billing.vehiclePlate}}</dd>{{/if}}
+        {{#if report.meta.companyName}}<dt>Arbeitgeber</dt><dd>{{report.meta.companyName}}</dd>{{/if}}
+        {{#if report.meta.companyAddress}}<dt>Anschrift</dt><dd>{{report.meta.companyAddress}}</dd>{{/if}}
         <dt>Arbeitspreis</dt><dd>{{money report.pricePerKwh 4}} / kWh</dd>
       </dl>
     </div>

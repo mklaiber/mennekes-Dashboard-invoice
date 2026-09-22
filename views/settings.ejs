@@ -18,17 +18,14 @@
       <div class="md-card__header">
         <div>
           <h2 class="md-card__title"><%- include('partials/icon', { name: 'ev', size: 18 }) %> Wallbox</h2>
-          <p class="md-card__support">Adresse der REST-API und Anzeigename im Dashboard.</p>
+          <p class="md-card__support">
+            Nur der Anzeigename. Die Ladedaten liefert der Connector aus dem Heimnetz –
+            eine Adresse ist hier nicht einzustellen.
+          </p>
         </div>
       </div>
 
       <div class="md-grid md-cols-2" style="margin-top:20px">
-        <label class="md-field">
-          <input class="md-field__input" type="url" id="wallbox-baseUrl" placeholder=" " required
-                 value="<%= settings.wallbox.baseUrl %>">
-          <span class="md-field__label">Basis-URL / Hostname</span>
-          <span class="md-field__hint">Auth-Modus: <span class="md-mono"><%= envInfo.wallboxAuthMode %></span> (via ENV)</span>
-        </label>
         <label class="md-field">
           <input class="md-field__input" type="text" id="wallbox-displayName" placeholder=" "
                  value="<%= settings.wallbox.displayName %>">
@@ -42,6 +39,11 @@
       <div class="md-card__header">
         <div>
           <h2 class="md-card__title"><%- include('partials/icon', { name: 'receipt', size: 18 }) %> Abrechnung</h2>
+          <p class="md-card__support">
+            Vorgaben für alle Abrechnungen. Arbeitgeber, Kennzeichen und Fahrer stehen
+            nicht hier, sondern am jeweiligen Fahrzeug im <a href="/fuhrpark">Fuhrpark</a> –
+            eine einzelne globale Angabe war genau die Beschränkung, die er aufhebt.
+          </p>
           <p class="md-card__support">Fließt direkt in PDF, CSV und die Dashboard-Vorschau ein.</p>
         </div>
       </div>
@@ -62,24 +64,6 @@
           <input class="md-field__input" type="text" id="billing-timezone" placeholder=" "
                  value="<%= settings.billing.timezone %>">
           <span class="md-field__label">Zeitzone</span>
-        </label>
-      </div>
-
-      <div class="md-grid md-cols-3" style="margin-top:20px">
-        <label class="md-field">
-          <input class="md-field__input" type="text" id="billing-employeeName" placeholder=" "
-                 value="<%= settings.billing.employeeName %>">
-          <span class="md-field__label">Mitarbeiter</span>
-        </label>
-        <label class="md-field">
-          <input class="md-field__input" type="text" id="billing-companyName" placeholder=" "
-                 value="<%= settings.billing.companyName %>">
-          <span class="md-field__label">Arbeitgeber</span>
-        </label>
-        <label class="md-field">
-          <input class="md-field__input" type="text" id="billing-vehiclePlate" placeholder=" "
-                 value="<%= settings.billing.vehiclePlate %>">
-          <span class="md-field__label">Kennzeichen</span>
         </label>
       </div>
 
@@ -172,39 +156,6 @@
           <span class="md-field__label">Kopie (CC)</span>
         </label>
       </div>
-    </section>
-
-    <!-- ===================== RFID ===================== -->
-    <section class="md-card">
-      <div class="md-card__header">
-        <div>
-          <h2 class="md-card__title"><%- include('partials/icon', { name: 'key', size: 18 }) %> RFID-Zuordnung</h2>
-          <p class="md-card__support">
-            Ordnet Karten-IDs einem Namen zu. Nicht zugeordnete Karten erscheinen im PDF als „unbekannt“.
-          </p>
-        </div>
-        <button type="button" id="add-rfid" class="md-btn md-btn--tonal md-btn--small">
-          <%- include('partials/icon', { name: 'add', size: 18 }) %> Karte
-        </button>
-      </div>
-
-      <div class="md-table-wrap" style="margin-top:16px">
-        <table class="md-table">
-          <thead>
-            <tr>
-              <th scope="col">RFID-ID</th>
-              <th scope="col">Name</th>
-              <th scope="col">Kennzeichen</th>
-              <th scope="col" style="text-align:center">Abrechenbar</th>
-              <th scope="col"><span class="sr-only">Aktion</span></th>
-            </tr>
-          </thead>
-          <tbody id="rfid-rows"></tbody>
-        </table>
-      </div>
-      <p id="rfid-empty" class="md-body-m md-on-surface-variant hidden" style="margin-top:12px">
-        Noch keine Zuordnung angelegt.
-      </p>
     </section>
 
     <!-- ===================== Automatisierung ===================== -->
@@ -346,9 +297,6 @@
 
 </main>
 
-<script id="bootstrap-settings" type="application/json" nonce="<%= cspNonce %>">
-  <%- JSON.stringify({ rfidMappings: settings.rfidMappings }) %>
-</script>
 <script src="/static/js/settings.js" nonce="<%= cspNonce %>" defer></script>
 
 <%- include('partials/foot') %>
