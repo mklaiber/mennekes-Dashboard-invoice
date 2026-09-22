@@ -262,8 +262,25 @@ async function main() {
   await statusTick();
   await sessionsTick();
 
-  const statusTimer = setInterval(() => { statusTick().catch(() => {}); }, config.statusIntervalMs);
-  const sessionsTimer = setInterval(() => { sessionsTick().catch(() => {}); }, config.sessionsIntervalMs);
+  // Ueberlappungsschutz: setInterval startet den naechsten Durchlauf
+  // unabhaengig davon, ob der vorige fertig ist. Bei 10s Takt faellt das nie
+  // auf, bei 2s schon: ein Modbus-Lesevorgang plus HTTPS-Push kann laenger
+  // dauern, und dann liefen mehrere Abfragen gleichzeitig ueber DIESELBE
+  // Modbus-Verbindung -- deren Antworten sind nicht zuverlaessig einander
+  // zuzuordnen. Ein hängender Durchlauf laesst den Takt lieber einmal
+  // aussetzen, als sich aufzustauen.
+  const ticking = { status: false, sessions: false };
+  const schedule = (name, fn, intervalMs) => setInterval(() => {
+    if (ticking[name]) {
+      logger.debug(`${name}-Takt uebersprungen: vorheriger Durchlauf laeuft noch.`);
+      return;
+    }
+    ticking[name] = true;
+    fn().catch(() => {}).finally(() => { ticking[name] = false; });
+  }, intervalMs);
+
+  const statusTimer = schedule('status', statusTick, config.statusIntervalMs);
+  const sessionsTimer = schedule('sessions', sessionsTick, config.sessionsIntervalMs);
 
   // ------------------------------------------------------- Herunterfahren
   async function shutdown(signal) {

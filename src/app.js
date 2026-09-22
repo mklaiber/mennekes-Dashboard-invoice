@@ -104,6 +104,15 @@ function createApp(deps = {}) {
       max: 600,
       standardHeaders: true,
       legacyHeaders: false,
+      // Die Datenannahme zaehlt hier NICHT mit. Sie wird im Sekundentakt
+      // bedient, waehrend dieses Budget pro IP gilt - und der Connector teilt
+      // sich die oeffentliche IP mit den Menschen im selben Heimnetz. Bei 2s
+      // Takt verbraeuchte er allein 450 der 600 Anfragen pro Fenster; wer von
+      // zu Hause das Dashboard oeffnet, liefe in ein 429, und schlimmer: der
+      // Connector selbst auch, womit stillschweigend Messwerte verloren
+      // gingen. /api/ingest bringt seinen eigenen, passend bemessenen Limiter
+      // mit (siehe routes/ingest.js) und ist ohnehin token-authentifiziert.
+      skip: (req) => req.path.startsWith('/api/ingest'),
       message: { error: 'rate_limited', message: 'Zu viele Anfragen. Bitte später erneut versuchen.' },
     }));
   }

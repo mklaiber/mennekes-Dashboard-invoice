@@ -143,7 +143,7 @@ Für andere Firmware-Generationen die Werte entsprechend anpassen.
 | `target_url` | Adresse des Online-Tools, z. B. `https://abrechnung.example.com` |
 | `target_token` | dasselbe Geheimnis wie `CONNECTOR_TOKEN` oben |
 | `verify_tls` | Zertifikatsprüfung zum Online-Tool – nur in einem Testaufbau abschalten |
-| `status_interval_seconds` | Takt der Live-Werte (5–300) |
+| `status_interval_seconds` | Takt der Live-Werte in Sekunden (2–300, Vorgabe 2) |
 | `sessions_interval_seconds` | Takt der Historie (60–86400) |
 | `history_days` | wie weit zurück die Historie abgefragt wird (1–365) |
 | `log_level` | `debug`, `info`, `warn`, `error` |
