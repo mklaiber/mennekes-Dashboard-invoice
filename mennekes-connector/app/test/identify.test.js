@@ -33,6 +33,15 @@ test('liefert null, wenn nichts Brauchbares da ist', () => {
   assert.strictEqual(identify('text'), null);
 });
 
+test('erkennt die groß geschriebenen AMTRON-Rohfelder (Start/Uid)', () => {
+  // Sowohl die REST-Ladehistorie (/ChargeRecords) als auch selbst
+  // rekonstruierte Modbus-Sitzungen (wallboxModbus.js) liefern 'Start'/'Uid'
+  // groß geschrieben - ohne diese Prüfung hätte queue.enqueue() jeden
+  // AMTRON-Datensatz mangels ID stillschweigend verworfen.
+  const id = identify({ Start: 1780000000, Uid: '04A1B2C3' });
+  assert.strictEqual(id, '1780000000-04A1B2C3');
+});
+
 test('findet die Vorgangsliste in den gängigen Antwortformen', () => {
   const expected = [{ a: 1 }];
 

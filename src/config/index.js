@@ -104,6 +104,11 @@ const config = {
   },
 
   mennekes: {
+    // 'rest'   - HTTP/JSON-API (MHCP/1.0, ältere Xtra/Premium-Firmware, siehe mennekesClient.js)
+    // 'modbus' - Modbus TCP (AMTRON Professional/Professional+/ChargeControl,
+    //            AMEDIO Professional, Bender CC612/613 - keine REST-Schnittstelle
+    //            laut Anleitung, siehe mennekesModbusClient.js)
+    protocol: str('MENNEKES_PROTOCOL', 'rest').toLowerCase(),
     baseUrl: str('MENNEKES_BASE_URL', 'http://192.168.1.50'),
     // Auth-Varianten: 'none' | 'basic' | 'bearer' | 'apikey' | 'query'
     // 'query' haengt den Token als Query-Parameter an (Name via
@@ -140,6 +145,15 @@ const config = {
     // 'amtron-stateful' (Open/Read/Close-Zustandsautomat der MENNEKES-
     // AMTRON-Firmware, siehe MennekesClient#fetchAmtronSessions).
     sessionsProtocol: str('MENNEKES_SESSIONS_PROTOCOL', 'simple').toLowerCase(),
+    // Nur für protocol='modbus'. Host separat von baseUrl, weil dort auch
+    // Schema/Pfad/Port für die REST-Variante drinstecken.
+    modbus: {
+      host: str('MENNEKES_MODBUS_HOST', ''),
+      port: int('MENNEKES_MODBUS_PORT', 502),
+      // Modbus-Unit-ID (Slave-Adresse). 255 ist der Ebee/Bender/MENNEKES-Registersatz-Standard.
+      unitId: int('MENNEKES_MODBUS_UNIT_ID', 255),
+      timeoutMs: int('MENNEKES_MODBUS_TIMEOUT_MS', 5000),
+    },
   },
 
   smtp: {
@@ -226,6 +240,17 @@ function assertProductionSecrets(cfg = config) {
   // ist dann bedeutungslos, das gemeinsame Geheimnis dafür zwingend.
   if (cfg.connector?.mode === 'connector') {
     if (!cfg.connector.token) missing.push('CONNECTOR_TOKEN');
+    if (missing.length > 0) {
+      throw new Error(
+        `Fehlende Pflicht-Umgebungsvariablen: ${missing.join(', ')}. `
+        + 'Bitte .env befüllen (Vorlage: .env.example) oder per Ansible/Docker injizieren.'
+      );
+    }
+    return;
+  }
+
+  if (cfg.mennekes.protocol === 'modbus') {
+    if (!cfg.mennekes.modbus.host) missing.push('MENNEKES_MODBUS_HOST');
     if (missing.length > 0) {
       throw new Error(
         `Fehlende Pflicht-Umgebungsvariablen: ${missing.join(', ')}. `

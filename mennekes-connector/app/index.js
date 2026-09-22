@@ -21,6 +21,7 @@
 const options = require('./lib/options');
 const logger = require('./lib/logger');
 const Wallbox = require('./lib/wallbox');
+const WallboxModbus = require('./lib/wallboxModbus');
 const Uplink = require('./lib/uplink');
 const Queue = require('./lib/queue');
 const mqttClient = require('./lib/mqttClient');
@@ -54,10 +55,14 @@ function identify(entry) {
     }
   }
 
-  const start = entry.start || entry.startTime || entry.startedAt || entry.sessionStart;
+  // 'Start'/'Uid' (groß) sind die MENNEKES-AMTRON-Rohfeldnamen (REST
+  // /ChargeRecords wie auch die selbst rekonstruierten Modbus-Sitzungen,
+  // siehe lib/wallboxModbus.js) - ohne diese Prüfung würde queue.enqueue()
+  // jeden AMTRON-Datensatz mangels ID stillschweigend verwerfen.
+  const start = entry.start || entry.startTime || entry.startedAt || entry.sessionStart || entry.Start;
   if (!start) return null;
 
-  const tag = entry.idTag || entry.rfid || entry.rfidTag || entry.tokenId || 'anon';
+  const tag = entry.idTag || entry.rfid || entry.rfidTag || entry.tokenId || entry.Uid || 'anon';
   return `${start}-${tag}`;
 }
 
@@ -78,7 +83,11 @@ async function main() {
     process.exit(1);
   }
 
-  const wallbox = new Wallbox(config.wallbox);
+  // AMTRON Professional/ChargeControl & Co. haben keine REST-Schnittstelle,
+  // nur Modbus TCP - siehe lib/wallboxModbus.js.
+  const wallbox = config.wallbox.protocol === 'modbus'
+    ? new WallboxModbus(config.wallbox)
+    : new Wallbox(config.wallbox);
   const uplink = new Uplink(config.target, config.version);
   const queue = new Queue(config.stateDir);
 
@@ -145,6 +154,14 @@ async function main() {
       // an zwei Stellen halten, die über kurz oder lang auseinanderliefen.
       const sent = await uplink.sendStatus(status); // sendStatus() protokolliert eigene Fehlschläge selbst
       normalized = sent.ok ? sent.normalized : null;
+
+      // Modbus rekonstruiert Ladevorgänge selbst aus dem Statusverlauf (siehe
+      // lib/wallboxModbus.js) - im selben, schnellen Takt statt erst mit dem
+      // langsameren sessionsTick() in die Warteschlange übernehmen: sonst läge
+      // ein gerade beendeter Ladevorgang bis zu sessions_interval_seconds lang
+      // nur im Arbeitsspeicher und wäre bei einem Absturz in der Zwischenzeit
+      // verloren.
+      await flushModbusSessions();
     } catch (error) {
       wallboxError = error;
     }
@@ -177,6 +194,23 @@ async function main() {
     if (bridge && !haUnavailableNotified && statusFailures >= HA_UNAVAILABLE_AFTER_FAILURES) {
       haUnavailableNotified = true;
       await bridge.setAvailable(false).catch(() => {});
+    }
+  }
+
+  /**
+   * Übernimmt seit dem letzten Aufruf abgeschlossene, selbst rekonstruierte
+   * Modbus-Ladevorgänge sofort in die Warteschlange (No-Op bei REST - dort
+   * liefert die Wallbox ihre Historie über sessionsTick()/getSessions(since)).
+   */
+  async function flushModbusSessions() {
+    if (config.wallbox.protocol !== 'modbus') return;
+    const entries = await wallbox.getSessions();
+    if (entries.length === 0) return;
+
+    const added = queue.enqueue(entries, identify);
+    if (added > 0) {
+      logger.info(`${added} neue(r) Ladevorgang/Ladevorgänge übernommen.`);
+      await flushQueue();
     }
   }
 

@@ -54,6 +54,10 @@ function slug(value, fallback) {
 function load() {
   const options = {
     wallbox: {
+      // 'rest'   - HTTP/JSON (MHCP/1.0, Xtra/Premium-Firmware)
+      // 'modbus' - Modbus TCP (AMTRON Professional/ChargeControl & Co. -
+      //            keine REST-Schnittstelle, siehe lib/wallboxModbus.js)
+      protocol: str('WALLBOX_PROTOCOL', 'rest').toLowerCase(),
       baseUrl: trimUrl(str('WALLBOX_URL', '')),
       // 'query': Token als Query-Parameter statt Header - so verlangt es
       // MENNEKES AMTRON (MHCP/1.0, Parametername "DevKey").
@@ -70,9 +74,15 @@ function load() {
       },
       // 'amtron-stateful': Open/Read/Close-Zustandsautomat für AMTRONs
       // /ChargeRecords (siehe Wallbox#fetchAmtronSessions). 'simple' (Default)
-      // ist ein einzelner GET mit Zeitraum-Query.
+      // ist ein einzelner GET mit Zeitraum-Query. Nur für protocol='rest'.
       sessionsProtocol: str('WALLBOX_SESSIONS_PROTOCOL', 'simple').toLowerCase(),
       timeoutMs: int('WALLBOX_TIMEOUT_MS', 8000),
+      // Nur für protocol='modbus'. Host per Vorgabe aus wallbox_url
+      // abgeleitet (siehe WallboxModbus#hostFromUrl) - nur bei Bedarf eigens
+      // setzen, z. B. wenn wallbox_url nicht wie eine URL aussieht.
+      modbusHost: raw('WALLBOX_MODBUS_HOST'),
+      modbusPort: int('WALLBOX_MODBUS_PORT', 502),
+      modbusUnitId: int('WALLBOX_MODBUS_UNIT_ID', 255),
     },
     target: {
       baseUrl: trimUrl(str('TARGET_URL', '')),
@@ -84,7 +94,7 @@ function load() {
     sessionsIntervalMs: int('SESSIONS_INTERVAL_SECONDS', 900) * 1000,
     historyDays: int('HISTORY_DAYS', 45),
     stateDir: str('STATE_DIR', '/data'),
-    version: str('CONNECTOR_VERSION', '1.1.0'),
+    version: str('CONNECTOR_VERSION', '1.2.0'),
     mqtt: {
       // Fehlt der Host - egal ob manuell gesetzt oder über den
       // Home-Assistant-Dienst gefunden (siehe run.sh) - bleiben die Sensoren
@@ -120,14 +130,19 @@ function load() {
     problems.push('target_token ist nicht gesetzt - ohne das gemeinsame Geheimnis weist das Online-Tool jede Sendung ab.');
   }
 
-  if (options.wallbox.authMode === 'basic' && !options.wallbox.username) {
-    problems.push('wallbox_auth_mode ist "basic", aber wallbox_username fehlt.');
-  }
-  if (['bearer', 'apikey', 'query'].includes(options.wallbox.authMode) && !options.wallbox.token) {
-    problems.push(`wallbox_auth_mode ist "${options.wallbox.authMode}", aber wallbox_token fehlt.`);
-  }
-  if (options.wallbox.authMode === 'query' && !options.wallbox.authQueryParam) {
-    problems.push('wallbox_auth_mode ist "query", aber wallbox_auth_query_param fehlt (bei AMTRON: "DevKey").');
+  // Auth-Prüfungen gelten nur für protocol='rest' - Modbus TCP kennt kein
+  // Token/Passwort auf Protokollebene (der Zugriff wird an der Wallbox selbst
+  // freigeschaltet, siehe DOCS.md).
+  if (options.wallbox.protocol !== 'modbus') {
+    if (options.wallbox.authMode === 'basic' && !options.wallbox.username) {
+      problems.push('wallbox_auth_mode ist "basic", aber wallbox_username fehlt.');
+    }
+    if (['bearer', 'apikey', 'query'].includes(options.wallbox.authMode) && !options.wallbox.token) {
+      problems.push(`wallbox_auth_mode ist "${options.wallbox.authMode}", aber wallbox_token fehlt.`);
+    }
+    if (options.wallbox.authMode === 'query' && !options.wallbox.authQueryParam) {
+      problems.push('wallbox_auth_mode ist "query", aber wallbox_auth_query_param fehlt (bei AMTRON: "DevKey").');
+    }
   }
 
   // Das Ziel steht im Internet. Unverschlüsselt ginge das gemeinsame Geheimnis

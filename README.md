@@ -171,22 +171,22 @@ Alternativ ohne Store: den Ordner `mennekes-connector/` in die Freigabe
 
 ### Wichtigste Optionen
 
-Die Vorgabe-Konfiguration ist bereits auf eine MENNEKES AMTRON (MHCP/1.0)
-eingestellt – Details und die Werte für andere Firmware-Generationen stehen in
+Die Vorgabe-Konfiguration ist bereits auf eine MENNEKES AMTRON Professional
+(Modbus TCP – diese Geräteklasse hat laut Anleitung keine REST-Schnittstelle)
+eingestellt – Details, die nötigen Einstellungen an der Wallbox selbst und die
+Werte für die ältere Xtra/Premium-Generation (REST) stehen in
 [`mennekes-connector/DOCS.md`](mennekes-connector/DOCS.md).
 
 ```yaml
-wallbox_url: "http://192.168.1.50:25000/MHCP/1.0"   # Wallbox im Heimnetz
-wallbox_auth_mode: query                            # AMTRON: Token als Query-Parameter
-wallbox_token: "<DevKey vom Einrichtungsdatenblatt>"
-wallbox_auth_query_param: DevKey
-endpoint_status: "/ChargeData"
-endpoint_sessions: "/ChargeRecords"
-wallbox_sessions_protocol: amtron-stateful
+wallbox_protocol: modbus
+wallbox_url: "http://192.168.1.50"       # Wallbox im Heimnetz
+wallbox_modbus_port: 502
+wallbox_modbus_unit_id: 255
 target_url: "https://abrechnung.example.com"
 target_token: "<derselbe Wert wie CONNECTOR_TOKEN>"
 status_interval_seconds: 10              # Live-Werte
-sessions_interval_seconds: 900           # Ladehistorie
+sessions_interval_seconds: 900           # bei Modbus nur noch Sicherheitsnetz - Ladevorgänge werden
+                                          # bereits im schnellen Live-Takt übernommen und gesendet
 mqtt_host: ""                            # optional: Home-Assistant-Sensoren, siehe unten
 ```
 
@@ -368,20 +368,65 @@ Nachgemessen am erzeugten PDF (150 dpi, drei Seiten): 20,2 mm oben,
 
 ---
 
-## Wichtig: Endpunkte der Wallbox prüfen
+## Wichtig: Zugriffsart der Wallbox prüfen
 
-Die REST-Pfade unterscheiden sich zwischen den MENNEKES-Firmware-Generationen
-(AMTRON Professional, Professional+, ChargeControl …). Dieses Projekt trifft
-deshalb **keine feste Annahme**: die Pfade sind über die `.env` konfigurierbar,
-und das Parsing der Antworten ist bewusst tolerant gegenüber unterschiedlichen
-Feldbenennungen.
+MENNEKES-Wallboxen sprechen je nach Baureihe **entweder** REST/JSON **oder**
+Modbus TCP – nie beides. Welche es ist, entscheidet die Geräteklasse, nicht
+die Firmware-Versionsnummer allein:
 
-### MENNEKES AMTRON (MHCP/1.0) – bereits vorkonfiguriert
+| Geräteklasse | Zugriff | Erkennbar an |
+|---|---|---|
+| AMTRON **Professional**/Professional+/ChargeControl, AMEDIO Professional, Bender CC612/613 | **Modbus TCP** (keine REST-Schnittstelle laut Anleitung) | Systeminformationen zeigen **keine** „REST-Schnittstelle" |
+| AMTRON **Xtra**/Premium | REST/JSON (MHCP/1.0) | „System → REST-Schnittstelle: Aktiviert", „EEBus-Stack-Version: KEO framework" |
 
-Für die **AMTRON**-Baureihe (Professional, Xtra, Premium – erkennbar an
-„System → REST-Schnittstelle: Aktiviert" und einer „EEBus-Stack-Version: KEO
-framework" in den Systeminformationen) ist `.env.example` bereits mit den
-echten Endpunkten vorbelegt:
+Dieses Projekt unterstützt beides über `MENNEKES_PROTOCOL` (`modbus` |
+`rest`) – vorbelegt ist `modbus`, die häufigere Geräteklasse in
+Privathaushalten.
+
+### AMTRON Professional & Co. (Modbus TCP) – bereits vorkonfiguriert
+
+`.env.example` ist bereits auf diese Geräteklasse eingestellt:
+
+```dotenv
+MENNEKES_PROTOCOL=modbus
+MENNEKES_BASE_URL=http://<WALLBOX-IP>
+MENNEKES_MODBUS_PORT=502
+MENNEKES_MODBUS_UNIT_ID=255
+```
+
+An der Wallbox selbst müssen einmalig drei Einstellungen aktiviert werden
+(Systemeinstellungen, nicht dieselbe Stelle wie eine etwaige
+„REST-Schnittstelle"):
+
+1. **„Modbus TCP Server für Energiemanagement-Systeme"** → aktivieren
+2. **„Registersatz"** → NICHT „Phoenix" oder „TQ-DM100", sondern die dritte
+   Option („Ebee"/„Bender"/„MENNEKES" o. ä.)
+3. **„UID Übertragung erlauben"** → aktivieren (für die RFID-Auswertung)
+
+**Quelle für die Register-Adressen:** der quelloffene, produktiv genutzte
+[evcc](https://github.com/evcc-io/evcc)-Treiber
+([`charger/bender.go`](https://github.com/evcc-io/evcc/blob/master/charger/bender.go),
+Typ `bender`) – dessen Template
+[`bender-cc`](https://github.com/evcc-io/evcc/blob/master/templates/definition/charger/bender-cc.yaml)
+die „AMTRON Professional" explizit als unterstütztes Produkt listet. Das ist
+deutlich verlässlicher als die reverse-engineerte REST-Dokumentation unten,
+aber weiterhin keine offizielle MENNEKES-Quelle.
+
+**Es gibt auch über Modbus kein Verlaufsregister** – nur den aktuellen
+Zustand. Abgeschlossene Ladevorgänge rekonstruiert die Anwendung deshalb
+selbst aus aufeinanderfolgenden Statusabfragen (Übergang „lädt" →
+„lädt nicht mehr", siehe `src/services/mennekesModbusClient.js`). Das läuft
+unabhängig vom Live-Dashboard weiter, auch wenn gerade niemand zuschaut.
+
+Bekannter Firmware-Effekt bei manchen 5.33.x-Ständen: einzelne Register
+liefern kurzzeitig `0xFFFFFFFF` statt eines echten Werts (siehe
+[evcc-io/evcc#27736](https://github.com/evcc-io/evcc/discussions/27736)) –
+wird als „vorübergehend nicht verfügbar" behandelt, nicht als Messwert.
+
+### AMTRON Xtra/Premium (REST, MHCP/1.0)
+
+Für diese ältere Geräteklasse `MENNEKES_PROTOCOL=rest` setzen, dann gelten
+die folgenden Werte:
 
 ```dotenv
 MENNEKES_BASE_URL=http://<WALLBOX-IP>:25000/MHCP/1.0
@@ -399,7 +444,9 @@ Zwei Besonderheiten gegenüber generischen REST-APIs:
   Anfrage) – daher `MENNEKES_AUTH_MODE=query` statt `bearer`/`apikey`. Der
   DevKey heißt in der Gerätedokumentation „APP-Pin" bzw. „PIN 1" und steht auf
   dem **Einrichtungsdatenblatt**, das der Wallbox beilag – nicht im
-  „Betreiberpasswort" der Systemseite.
+  „Betreiberpasswort" der Systemseite. (Bei der Professional-Klasse gibt es
+  laut MENNEKES-Support **keine** solchen PINs – ein Indiz, dass dort ohnehin
+  Modbus statt REST der richtige Weg ist, siehe oben.)
 - **Die Ladehistorie ist zustandsbehaftet**: `/ChargeRecords` verlangt erst
   `State=Open` (liefert die Gesamtzahl), dann wiederholt `State=Read`
   (je bis zu 10 Datensätze), zuletzt `State=Close`. `MENNEKES_SESSIONS_PROTOCOL=
@@ -422,7 +469,7 @@ Batch-Antwort. Der Parser probiert mehrere plausible Formen (siehe
 Ladehistorie leere Ergebnisse trotz vorhandener Ladevorgänge, hilft ein
 `curl`-Mitschnitt der `State=Read`-Antwort weiter.
 
-### Andere Firmware-Generationen
+### Andere Firmware-Generationen (REST)
 
 Vor dem ersten Produktivlauf gegen die eigene Wallbox prüfen:
 
@@ -440,8 +487,11 @@ MENNEKES_ENDPOINT_METER=            # optional, falls Zählerwerte separat komme
 MENNEKES_SESSIONS_PROTOCOL=simple   # Standard: ein GET, Antwort ist eine Liste
 ```
 
-**Die Feldnamen innerhalb der Antwort müssen meist nicht angepasst werden.** Der
-Client erkennt jeweils mehrere gängige Schreibweisen, darunter die von AMTRON
+**Die Feldnamen innerhalb der Antwort müssen meist nicht angepasst werden.**
+(Gilt nur für `MENNEKES_PROTOCOL=rest` – Modbus adressiert feste
+Register-Nummern statt JSON-Feldnamen, siehe `src/services/mennekesModbusClient.js`,
+da gibt es keine Namensvielfalt zum Tolerieren.) Der Client erkennt jeweils
+mehrere gängige Schreibweisen, darunter die von AMTRON
 (`ChgState`, `ActPwr`, `ChgNrg`, `Uid`, `ChrNr`, `Start`/`Stop`):
 
 | Wert | Akzeptierte Felder (Auswahl) |
@@ -462,12 +512,14 @@ Zusätzlich werden erkannt und umgerechnet:
 Ein Datensatz ohne Startzeitpunkt oder ohne ermittelbare Energie wird verworfen,
 statt die Abrechnung zu verfälschen.
 
-**Bewusst nicht gemappt:** AMTRONs `ActCurr` ist laut Dokumentation eine
-konfigurierte Strom-Obergrenze, kein Messwert – sie erscheint deshalb nicht als
-„Strom" im Dashboard (das wäre irreführend). Eine belastbare Quelle für
-Strom/Spannung als Messwert sowie für den lebenslangen Zählerstand liefert die
-AMTRON-API in der bekannten Dokumentation nicht; das Dashboard zeigt dort „–"
-statt einen geratenen Wert.
+**Bewusst nicht gemappt (nur REST):** AMTRONs `ActCurr` ist laut Dokumentation
+eine konfigurierte Strom-Obergrenze, kein Messwert – sie erscheint deshalb
+nicht als „Strom" im Dashboard (das wäre irreführend). Eine belastbare Quelle
+für Strom/Spannung als Messwert sowie für den lebenslangen Zählerstand liefert
+die REST-API in der bekannten Dokumentation nicht; das Dashboard zeigt dort
+„–" statt einen geratenen Wert. **Über Modbus (Professional & Co.) sind alle
+drei dagegen verlässlich vorhanden** – Ströme, Spannungen und der lebenslange
+Zählerstand stehen dort in eigenen Registern (212/222/218, siehe oben).
 
 ---
 

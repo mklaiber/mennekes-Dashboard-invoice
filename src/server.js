@@ -54,12 +54,21 @@ async function main() {
 
   await bootstrap();
 
-  const { app, liveFeed } = createApp();
+  const { app, liveFeed, mennekesClient } = createApp();
 
   const server = app.listen(config.server.port, config.server.host, () => {
     logger.info(`WebUI läuft auf http://${config.server.host}:${config.server.port} (${config.env})`);
     logger.info(`Wallbox: ${config.mennekes.baseUrl} | Ausgabeverzeichnis: ${config.server.outputDir}`);
   });
+
+  // Modbus (AMTRON Professional & Co.): eigener, von LiveFeed unabhängiger
+  // Takt für die Sitzungs-Erfassung - die läuft auch ohne offenes Dashboard
+  // weiter (siehe mennekesModbusClient.js#startTracking). Im Connector-Betrieb
+  // ist die Wallbox von hier aus ohnehin nicht erreichbar.
+  const modbusTrackingActive = config.mennekes.protocol === 'modbus'
+    && config.connector.mode !== 'connector'
+    && typeof mennekesClient.startTracking === 'function';
+  if (modbusTrackingActive) mennekesClient.startTracking();
 
   // SSE-Verbindungen sind langlebig - der Default-Timeout (2 min) würde sie kappen.
   server.keepAliveTimeout = 0;
@@ -86,6 +95,7 @@ async function main() {
     clearInterval(housekeeping);
     scheduler.stop();
     liveFeed.shutdown();
+    if (modbusTrackingActive) await mennekesClient.stopTracking();
 
     server.close(async () => {
       await closeBrowser();

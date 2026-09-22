@@ -30,16 +30,20 @@ const { createAuthRouter, createAccountRouter } = require('./routes/auth');
 const { createUserRouter } = require('./routes/users');
 const { createIngestRouter } = require('./routes/ingest');
 const MennekesClient = require('./services/mennekesClient');
+const MennekesModbusClient = require('./services/mennekesModbusClient');
 const LiveFeed = require('./services/liveFeed');
 
 /**
  * @param {object} [deps]
- * @param {MennekesClient} [deps.mennekesClient]
+ * @param {MennekesClient|MennekesModbusClient} [deps.mennekesClient]
  * @param {LiveFeed} [deps.liveFeed]
- * @returns {{app: import('express').Express, liveFeed: LiveFeed, mennekesClient: MennekesClient}}
+ * @returns {{app: import('express').Express, liveFeed: LiveFeed, mennekesClient: MennekesClient|MennekesModbusClient}}
  */
 function createApp(deps = {}) {
-  const mennekesClient = deps.mennekesClient || new MennekesClient();
+  // AMTRON Professional/ChargeControl & Co. haben keine REST-Schnittstelle,
+  // nur Modbus TCP - siehe mennekesModbusClient.js.
+  const mennekesClient = deps.mennekesClient
+    || (config.mennekes.protocol === 'modbus' ? new MennekesModbusClient() : new MennekesClient());
   const liveFeed = deps.liveFeed || new LiveFeed({ client: mennekesClient });
 
   const app = express();

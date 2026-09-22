@@ -23,7 +23,7 @@ arbeitet still im Hintergrund.
 | Takt | Intervall (Vorgabe) | Inhalt |
 |---|---|---|
 | Live-Zustand | 10 Sekunden | Ladeleistung, Status, aktive Ladekarte, Zählerstand |
-| Ladehistorie | 15 Minuten | abgeschlossene Ladevorgänge der letzten 45 Tage |
+| Ladehistorie | 15 Minuten | abgeschlossene Ladevorgänge (bei `wallbox_protocol: rest` der letzten 45 Tage von der Wallbox; bei `modbus` selbst aus dem Live-Takt rekonstruiert, siehe unten) |
 
 Optional legt das Add-on dabei auch Home-Assistant-Sensoren an (siehe
 [„Home-Assistant-Sensoren (MQTT)“](#home-assistant-sensoren-mqtt) weiter
@@ -56,10 +56,47 @@ CONNECTOR_TOKEN=<Ausgabe von: openssl rand -hex 32>
 Danach neu starten. `MENNEKES_BASE_URL` wird in dieser Betriebsart nicht mehr
 gebraucht – das Online-Tool spricht die Wallbox nie an.
 
-### 2. Endpunkte der Wallbox prüfen
+### 2. Zugriffsart der Wallbox einstellen
 
-Die REST-Pfade unterscheiden sich zwischen den Firmware-Ständen. Einmal im
-Heimnetz nachsehen:
+MENNEKES-Wallboxen sprechen je nach Geräteklasse **entweder** REST/JSON
+**oder** Modbus TCP – nie beides:
+
+| Geräteklasse | Zugriff | Erkennbar an |
+|---|---|---|
+| AMTRON **Professional**/Professional+/ChargeControl, AMEDIO Professional, Bender CC612/613 | **Modbus TCP** (keine REST-Schnittstelle laut Anleitung) | Systeminformationen zeigen **keine** „REST-Schnittstelle" |
+| AMTRON **Xtra**/Premium | REST/JSON (MHCP/1.0) | „System → REST-Schnittstelle: Aktiviert", „EEBus-Stack-Version: KEO framework" |
+
+Die Vorgabe-Konfiguration dieses Add-ons ist bereits auf die **Professional**-
+Geräteklasse eingestellt (`wallbox_protocol: modbus`) – die häufigere Klasse
+in Privathaushalten.
+
+#### AMTRON Professional & Co. (Modbus TCP) – Vorgabe
+
+An der Wallbox einmalig aktivieren (Systemeinstellungen, nicht dieselbe
+Stelle wie eine etwaige „REST-Schnittstelle"):
+
+1. **„Modbus TCP Server für Energiemanagement-Systeme"** → aktivieren
+2. **„Registersatz"** → NICHT „Phoenix" oder „TQ-DM100", sondern die dritte
+   Option („Ebee"/„Bender"/„MENNEKES" o. ä.)
+3. **„UID Übertragung erlauben"** → aktivieren (für die RFID-Auswertung)
+
+Dann im Add-on nur `wallbox_url` (IP-Adresse) eintragen – Port (`502`) und
+Unit-ID (`255`) passen für diese Geräteklasse bereits.
+
+**Quelle für die Register-Adressen:** der quelloffene, produktiv genutzte
+[evcc](https://github.com/evcc-io/evcc)-Treiber (`charger/bender.go`, Typ
+`bender`) – dessen Template `bender-cc` die „AMTRON Professional" explizit
+als unterstütztes Produkt listet.
+
+Es gibt **kein Verlaufsregister** – nur den aktuellen Zustand. Das Add-on
+rekonstruiert abgeschlossene Ladevorgänge deshalb selbst aus
+aufeinanderfolgenden Statusabfragen (Übergang „lädt" → „lädt nicht mehr") und
+übernimmt sie direkt im schnellen Live-Takt in die Warteschlange – nicht erst
+mit dem langsameren Historie-Takt.
+
+#### AMTRON Xtra/Premium (REST, MHCP/1.0) – Alternative
+
+`wallbox_protocol: rest` setzen, dann im Heimnetz die Pfade prüfen:
 
 ```bash
 curl -s http://192.168.1.50/api/v1/status | jq
@@ -69,41 +106,40 @@ curl -s http://192.168.1.50/api/v1/transactions | jq
 Die **Feldnamen** innerhalb der Antwort müssen nicht passen – das Online-Tool
 erkennt die gängigen Schreibweisen selbst. Nur die **Pfade** müssen stimmen.
 
-**MENNEKES AMTRON (MHCP/1.0):** Die Vorgabe-Konfiguration dieses Add-ons ist
-bereits auf dieses Modell eingestellt (`wallbox_auth_mode: query`,
+Für die AMTRON Xtra/Premium (MHCP/1.0) diese Werte setzen:
+`wallbox_auth_mode: query`, `wallbox_auth_query_param: DevKey`,
 `endpoint_status: /ChargeData`, `endpoint_sessions: /ChargeRecords`,
-`wallbox_sessions_protocol: amtron-stateful`) – erkennbar an „System →
-REST-Schnittstelle: Aktiviert“ in den Systeminformationen der Wallbox. Nur
-noch `wallbox_url` (IP-Adresse) und `wallbox_token` eintragen:
+`wallbox_sessions_protocol: amtron-stateful`, sowie `wallbox_token`:
 
 - `wallbox_token` ist der **DevKey** – er steht auf dem Einrichtungsdatenblatt,
   das der Wallbox beilag (dort auch als „APP-Pin“ bzw. „PIN 1“ bezeichnet).
 - Die Authentifizierung läuft bei diesem Modell über einen Query-Parameter
-  (`?DevKey=...`), nicht über einen Header – deshalb `wallbox_auth_mode: query`
-  zusammen mit `wallbox_auth_query_param: DevKey`.
+  (`?DevKey=...`), nicht über einen Header.
 - Die Ladehistorie (`/ChargeRecords`) ist zustandsbehaftet: der Connector
-  öffnet eine Sitzung, liest paketweise und schließt wieder
-  (`wallbox_sessions_protocol: amtron-stateful`). `simple` (ein einzelner GET)
-  liefert bei AMTRON nur eine leere Antwort.
+  öffnet eine Sitzung, liest paketweise und schließt wieder. `simple` (ein
+  einzelner GET) liefert bei AMTRON nur eine leere Antwort.
 - Zum Prüfen von außerhalb des Connectors: `curl -s
   "http://192.168.1.50:25000/MHCP/1.0/DevInfo?DevKey=<DevKey>"`.
 
-Für andere Firmware-Generationen die Werte unten wie gewohnt anpassen.
+Für andere Firmware-Generationen die Werte entsprechend anpassen.
 
 ### 3. Add-on konfigurieren
 
 | Option | Bedeutung |
 |---|---|
+| `wallbox_protocol` | `modbus` (AMTRON Professional & Co., Vorgabe) oder `rest` (Xtra/Premium) |
 | `wallbox_url` | Adresse der Wallbox im Heimnetz, z. B. `http://192.168.1.50` |
-| `wallbox_auth_mode` | `none`, `basic`, `bearer`, `apikey` oder `query` (AMTRON: `query`) |
-| `wallbox_username` / `wallbox_password` | nur bei `basic` |
-| `wallbox_token` | nur bei `bearer`, `apikey` oder `query` (AMTRON: der DevKey) |
-| `wallbox_auth_query_param` | nur bei `query` – Name des Query-Parameters (AMTRON: `DevKey`) |
-| `endpoint_status` | Pfad für den Live-Zustand |
-| `endpoint_sessions` | Pfad für die Ladehistorie |
-| `endpoint_meter` | optional, falls Zählerwerte separat kommen |
-| `wallbox_sessions_protocol` | `simple` (ein GET) oder `amtron-stateful` (Open/Read/Close, siehe oben) |
-| `wallbox_verify_tls` | auf `false`, wenn die Wallbox ein selbstsigniertes Zertifikat nutzt |
+| `wallbox_modbus_port` | nur bei `modbus` – Modbus-TCP-Port (Vorgabe `502`) |
+| `wallbox_modbus_unit_id` | nur bei `modbus` – Modbus-Unit-ID/Slave-Adresse (Vorgabe `255`) |
+| `wallbox_auth_mode` | nur bei `rest` – `none`, `basic`, `bearer`, `apikey` oder `query` (AMTRON Xtra/Premium: `query`) |
+| `wallbox_username` / `wallbox_password` | nur bei `rest` + `basic` |
+| `wallbox_token` | nur bei `rest` + `bearer`/`apikey`/`query` (AMTRON Xtra/Premium: der DevKey) |
+| `wallbox_auth_query_param` | nur bei `rest` + `query` – Name des Query-Parameters (AMTRON: `DevKey`) |
+| `endpoint_status` | nur bei `rest` – Pfad für den Live-Zustand |
+| `endpoint_sessions` | nur bei `rest` – Pfad für die Ladehistorie |
+| `endpoint_meter` | nur bei `rest` – optional, falls Zählerwerte separat kommen |
+| `wallbox_sessions_protocol` | nur bei `rest` – `simple` (ein GET) oder `amtron-stateful` (Open/Read/Close, siehe oben) |
+| `wallbox_verify_tls` | nur bei `rest` – auf `false`, wenn die Wallbox ein selbstsigniertes Zertifikat nutzt |
 | `target_url` | Adresse des Online-Tools, z. B. `https://abrechnung.example.com` |
 | `target_token` | dasselbe Geheimnis wie `CONNECTOR_TOKEN` oben |
 | `verify_tls` | Zertifikatsprüfung zum Online-Tool – nur in einem Testaufbau abschalten |
@@ -161,7 +197,7 @@ Wert stehen zu lassen; beim regulären Beenden des Add-ons ebenso.
 Nach dem Start steht im Add-on-Protokoll:
 
 ```
-INFO : Connector 1.0.0 gestartet.
+INFO : Connector 1.2.0 gestartet.
 INFO : Offene Ladevorgänge in der Warteschlange: 0
 INFO : Home-Assistant-Sensoren aktiv (Gerät "Mennekes Wallbox").
 INFO : Wallbox erreichbar.

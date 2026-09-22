@@ -7,7 +7,10 @@
 # =============================================================================
 set -e
 
+export WALLBOX_PROTOCOL="$(bashio::config 'wallbox_protocol')"
 export WALLBOX_URL="$(bashio::config 'wallbox_url')"
+export WALLBOX_MODBUS_PORT="$(bashio::config 'wallbox_modbus_port')"
+export WALLBOX_MODBUS_UNIT_ID="$(bashio::config 'wallbox_modbus_unit_id')"
 export WALLBOX_AUTH_MODE="$(bashio::config 'wallbox_auth_mode')"
 export WALLBOX_USERNAME="$(bashio::config 'wallbox_username')"
 export WALLBOX_PASSWORD="$(bashio::config 'wallbox_password')"
@@ -51,7 +54,7 @@ if bashio::supervisor.ping 2>/dev/null; then
 fi
 
 bashio::log.info "Starte Mennekes Wallbox Connector ..."
-bashio::log.info "Wallbox:     ${WALLBOX_URL}"
+bashio::log.info "Wallbox:     ${WALLBOX_URL} (${WALLBOX_PROTOCOL})"
 bashio::log.info "Ziel:        ${TARGET_URL}"
 bashio::log.info "Takt:        Status alle ${STATUS_INTERVAL_SECONDS}s, Historie alle ${SESSIONS_INTERVAL_SECONDS}s"
 if [ -n "${MQTT_HOST}" ] && [ "${MQTT_HOST}" != "null" ]; then

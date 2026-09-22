@@ -1,14 +1,14 @@
 # =============================================================================
 #  Home-Assistant-Add-on: Mennekes Wallbox Connector
 #
-#  Reiner Datenvermittler. Liest die Wallbox im Heimnetz über deren REST-API
-#  und schiebt die Werte an das Online-Tool. Die Verbindung geht ausschließlich
-#  von hier nach AUSSEN - die Wallbox bleibt im LAN und braucht weder eine
-#  Portweiterleitung noch eine öffentliche Adresse.
+#  Reiner Datenvermittler. Liest die Wallbox im Heimnetz aus (Modbus TCP oder
+#  REST, je nach Geräteklasse) und schiebt die Werte an das Online-Tool. Die
+#  Verbindung geht ausschließlich von hier nach AUSSEN - die Wallbox bleibt im
+#  LAN und braucht weder eine Portweiterleitung noch eine öffentliche Adresse.
 # =============================================================================
 
 name: Mennekes Wallbox Connector
-version: "1.1.0"
+version: "1.2.0"
 slug: mennekes_connector
 description: >-
   Liest die Ladedaten einer MENNEKES Wallbox im Heimnetz aus und übermittelt sie
@@ -34,25 +34,31 @@ host_network: false
 # Verfügung und wird von Home Assistant persistiert. Dort liegt die
 # Warteschlange der noch nicht zugestellten Ladevorgänge.
 
-# Vorbelegt für eine MENNEKES AMTRON (MHCP/1.0-REST-Schnittstelle, erkennbar
-# an "System → REST-Schnittstelle: Aktiviert" und einer "EEBus-Stack-Version:
-# KEO framework" in den Systeminformationen der Wallbox). Für andere
-# Firmware-Generationen die Werte unten anpassen - siehe DOCS.md.
+# Vorbelegt für eine MENNEKES AMTRON Professional/Professional+/ChargeControl
+# (und verwandte Bender-CC-Plattform-Geräte: AMEDIO Professional, Bender
+# CC612/613, ...): DIESE Geräteklasse hat laut offizieller Anleitung KEINE
+# REST-Schnittstelle - nur Modbus TCP und OCPP. An der Wallbox müssen dafür
+# einmalig "Modbus TCP Server für Energiemanagement-Systeme" aktiviert und
+# "Registersatz" auf "Ebee"/"Bender"/"MENNEKES" gestellt werden (NICHT
+# "Phoenix"/"TQ-DM100"), siehe DOCS.md.
+#
+# Für die ältere Xtra/Premium-Generation (MHCP/1.0-REST-Schnittstelle, "System
+# → REST-Schnittstelle: Aktiviert" in den Systeminformationen) unten
+# wallbox_protocol auf "rest" umstellen - siehe DOCS.md.
 options:
-  wallbox_url: "http://192.168.1.50:25000/MHCP/1.0"
-  wallbox_auth_mode: query
+  wallbox_protocol: modbus
+  wallbox_url: "http://192.168.1.50"
+  wallbox_modbus_port: 502
+  wallbox_modbus_unit_id: 255
+  wallbox_auth_mode: none
   wallbox_username: ""
   wallbox_password: ""
-  # Der "DevKey" (Gerätedokumentation: "APP-Pin"/"PIN 1") steht auf dem
-  # Einrichtungsdatenblatt, das der Wallbox beilag.
   wallbox_token: ""
-  wallbox_auth_query_param: DevKey
-  endpoint_status: "/ChargeData"
-  endpoint_sessions: "/ChargeRecords"
+  wallbox_auth_query_param: ""
+  endpoint_status: "/api/v1/status"
+  endpoint_sessions: "/api/v1/transactions"
   endpoint_meter: ""
-  # AMTRONs Ladehistorie ist zustandsbehaftet (Open/Read/Close) - "simple"
-  # (ein einzelner GET) würde hier nur eine leere Antwort liefern.
-  wallbox_sessions_protocol: amtron-stateful
+  wallbox_sessions_protocol: simple
   target_url: "https://abrechnung.example.com"
   target_token: ""
   status_interval_seconds: 10
@@ -75,7 +81,12 @@ options:
 
 schema:
   # --- Wallbox im Heimnetz --------------------------------------------------
+  wallbox_protocol: "list(modbus|rest)"
   wallbox_url: url
+  # Nur für wallbox_protocol='modbus'.
+  wallbox_modbus_port: port
+  wallbox_modbus_unit_id: "int(1,255)"
+  # Alles Folgende nur für wallbox_protocol='rest'.
   wallbox_auth_mode: "list(none|basic|bearer|apikey|query)"
   wallbox_username: str?
   wallbox_password: password?

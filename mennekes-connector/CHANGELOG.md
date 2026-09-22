@@ -1,5 +1,24 @@
 # Änderungsverlauf
 
+## 1.2.0
+
+- **Modbus-TCP-Unterstützung** für MENNEKES AMTRON Professional/Professional+/
+  ChargeControl, AMEDIO Professional und verwandte Bender-CC-Plattform-Geräte:
+  diese Geräteklasse hat laut offizieller Anleitung **keine REST-Schnittstelle**
+  – die in 1.1.0 vorbelegte REST/MHCP-Konfiguration war für sie nicht nutzbar.
+  Neue Option `wallbox_protocol` (`modbus`, jetzt Vorgabe, oder `rest` für die
+  ältere Xtra/Premium-Generation) sowie `wallbox_modbus_port`/
+  `wallbox_modbus_unit_id`. Register-Adressen aus dem quelloffenen
+  evcc-Treiber (`charger/bender.go`), der „AMTRON Professional" explizit als
+  unterstütztes Produkt führt.
+- Da es auch über Modbus kein Verlaufsregister gibt, rekonstruiert das Add-on
+  abgeschlossene Ladevorgänge jetzt selbst aus dem Live-Statusverlauf und
+  übernimmt sie direkt im schnellen Takt in die Warteschlange – nicht erst mit
+  dem langsameren Historie-Takt.
+- Fehler behoben: `identify()` erkannte die groß geschriebenen
+  AMTRON-Rohfelder (`Start`/`Uid`) nicht und hätte solche Datensätze
+  mangels ID stillschweigend verworfen.
+
 ## 1.1.0
 
 - Optionale Home-Assistant-Sensoren über MQTT Discovery: legt bei gesetztem
