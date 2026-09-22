@@ -105,12 +105,17 @@ const config = {
 
   mennekes: {
     baseUrl: str('MENNEKES_BASE_URL', 'http://192.168.1.50'),
-    // Auth-Varianten: 'none' | 'basic' | 'bearer' | 'apikey'
+    // Auth-Varianten: 'none' | 'basic' | 'bearer' | 'apikey' | 'query'
+    // 'query' haengt den Token als Query-Parameter an (Name via
+    // MENNEKES_AUTH_QUERY_PARAM) statt ihn als Header zu senden - so
+    // verlangt es z. B. die MENNEKES-AMTRON-REST-Schnittstelle (MHCP/1.0,
+    // Parametername "DevKey").
     authMode: str('MENNEKES_AUTH_MODE', 'none').toLowerCase(),
     username: raw('MENNEKES_USERNAME'),
     password: raw('MENNEKES_PASSWORD'),
     token: raw('MENNEKES_TOKEN'),
     apiKeyHeader: str('MENNEKES_API_KEY_HEADER', 'X-API-Key'),
+    authQueryParam: raw('MENNEKES_AUTH_QUERY_PARAM'),
     timeoutMs: int('MENNEKES_TIMEOUT_MS', 8000),
     retries: int('MENNEKES_RETRIES', 2),
     // TLS-Verifikation nur abschalten, wenn die Wallbox ein selbstsigniertes Zertifikat nutzt.
@@ -122,13 +127,19 @@ const config = {
       meter: raw('MENNEKES_ENDPOINT_METER'),
       sessions: str('MENNEKES_ENDPOINT_SESSIONS', '/api/v1/transactions'),
     },
-    // Query-Parameternamen für die Zeitraumfilterung der Historie.
+    // Query-Parameternamen für die Zeitraumfilterung der Historie
+    // (nur fuer sessionsProtocol='simple' - 'amtron-stateful' verwendet
+    // die festen Parameter "Start"/"End" des Geraeteprotokolls).
     sessionQuery: {
       fromParam: str('MENNEKES_SESSIONS_FROM_PARAM', 'from'),
       toParam: str('MENNEKES_SESSIONS_TO_PARAM', 'to'),
       limitParam: str('MENNEKES_SESSIONS_LIMIT_PARAM', 'limit'),
       limit: int('MENNEKES_SESSIONS_LIMIT', 1000),
     },
+    // Protokoll der Ladehistorie: 'simple' (ein GET, Antwort = Liste) oder
+    // 'amtron-stateful' (Open/Read/Close-Zustandsautomat der MENNEKES-
+    // AMTRON-Firmware, siehe MennekesClient#fetchAmtronSessions).
+    sessionsProtocol: str('MENNEKES_SESSIONS_PROTOCOL', 'simple').toLowerCase(),
   },
 
   smtp: {
@@ -226,7 +237,7 @@ function assertProductionSecrets(cfg = config) {
 
   if (!cfg.mennekes.baseUrl) missing.push('MENNEKES_BASE_URL');
   if (cfg.mennekes.authMode === 'basic' && !cfg.mennekes.password) missing.push('MENNEKES_PASSWORD');
-  if (['bearer', 'apikey'].includes(cfg.mennekes.authMode) && !cfg.mennekes.token) missing.push('MENNEKES_TOKEN');
+  if (['bearer', 'apikey', 'query'].includes(cfg.mennekes.authMode) && !cfg.mennekes.token) missing.push('MENNEKES_TOKEN');
 
   if (missing.length > 0) {
     throw new Error(

@@ -42,6 +42,14 @@ const STATUS_MAP = {
   offline: 'offline',
   faulted: 'error',
   error: 'error',
+  // MENNEKES AMTRON (MHCP/1.0, /ChargeData: ChgState) - reverse-engineert,
+  // siehe https://github.com/orlopau/amtron. "Terminated" bildet eine
+  // beendete, aber ggf. noch angesteckte Sitzung ab; mangels Gegenprobe an
+  // einem echten Gerät konservativ auf "verbunden" statt "Standby" gelegt.
+  paused: 'connected',
+  standbyconnect: 'connected',
+  standbyauthorize: 'connected',
+  terminated: 'connected',
 };
 
 /** Menschlich lesbare Labels für das Dashboard. */
@@ -147,6 +155,16 @@ class MennekesClient {
     this.sessionQuery = { ...config.mennekes.sessionQuery, ...(options.sessionQuery || {}) };
     this.retries = Number.isInteger(merged.retries) ? merged.retries : 2;
     this.authMode = merged.authMode;
+    // MENNEKES AMTRON (MHCP/1.0) verlangt den DevKey als QUERY-Parameter auf
+    // jeder Anfrage, nicht als Header - ein vierter Auth-Modus neben
+    // none/basic/bearer/apikey. Bleibt leer/wirkungslos, solange kein Token
+    // gesetzt ist (siehe #authParams()).
+    this.authQueryParam = merged.authQueryParam || null;
+    this.authQueryToken = merged.token || null;
+    // Firmware-abhängiges Protokoll für die Ladehistorie:
+    //  'simple'          - ein GET mit from/to-Query, Antwort ist ein Array (Default).
+    //  'amtron-stateful'  - Open/Read/Close-Zustandsautomat (siehe #fetchAmtronSessions()).
+    this.sessionsProtocol = (merged.sessionsProtocol || 'simple').toLowerCase();
 
     this.http = options.httpClient || axios.create({
       baseURL: this.baseUrl,
@@ -173,16 +191,30 @@ class MennekesClient {
   }
 
   /**
+   * Auth-Parameter, die (nur im 'query'-Modus) an JEDE Anfrage angehängt
+   * werden - MENNEKES AMTRON verlangt den DevKey auf jedem Aufruf, auch auf
+   * den Read/Close-Schritten der Ladehistorie.
+   * @returns {Record<string,string>}
+   */
+  #authParams() {
+    if (this.authMode === 'query' && this.authQueryParam && this.authQueryToken) {
+      return { [this.authQueryParam]: this.authQueryToken };
+    }
+    return {};
+  }
+
+  /**
    * GET mit Retry (nur bei Netzwerk-/5xx-Fehlern, nicht bei 4xx).
    * @param {string} path
    * @param {object} [params]
    * @returns {Promise<any>}
    */
   async #get(path, params) {
+    const mergedParams = { ...this.#authParams(), ...params };
     let lastError;
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
-        const response = await this.http.get(path, { params });
+        const response = await this.http.get(path, { params: mergedParams });
         return response.data;
       } catch (error) {
         lastError = error;
@@ -237,7 +269,10 @@ class MennekesClient {
    */
   static normalizeStatus(box = {}, meter = box) {
     const rawStatus = pick(box, [
-      'status', 'state', 'chargePointState', 'connectorStatus',
+      // 'ChgState' ist das Feld der MENNEKES-AMTRON-Firmware (/ChargeData
+      // und /DevInfo, MHCP/1.0): Idle, Charging, Paused, StandbyConnect,
+      // StandbyAuthorize, Terminated - siehe STATUS_MAP oben.
+      'status', 'state', 'ChgState', 'chargePointState', 'connectorStatus',
       'connectors.0.status', 'evseState', 'cpState', 'mode3State',
     ]);
 
@@ -245,7 +280,10 @@ class MennekesClient {
     const status = STATUS_MAP[statusKey] || (statusKey ? 'unknown' : 'unknown');
 
     const powerRaw = pick(meter, [
-      'power', 'powerKw', 'activePower', 'chargingPower', 'meter.power',
+      // 'ActPwr' (AMTRON /ChargeData) ist laut Community-Dokumentation in
+      // Watt angegeben - ohne eigenes Einheitenfeld. Die Watt-Heuristik
+      // unten (>100 => Watt) greift dafür bereits zuverlässig.
+      'power', 'powerKw', 'ActPwr', 'activePower', 'chargingPower', 'meter.power',
       'powerActiveTotal', 'currentPower', 'p_total',
     ]);
     const powerUnit = pick(meter, ['powerUnit', 'meter.powerUnit', 'unit']);
@@ -259,16 +297,24 @@ class MennekesClient {
       pick(meter, ['energyUnit', 'meter.energyUnit'])
     );
 
-    const energySessionKwh = energyToKwh(
+    let energySessionKwh = energyToKwh(
       pick(box, [
         'sessionEnergy', 'energySession', 'chargedEnergy', 'transaction.energy',
         'currentSession.energy', 'session.energyKwh',
       ]),
       pick(box, ['energyUnit', 'sessionEnergyUnit'])
     );
+    // 'ChgNrg' (AMTRON /ChargeData) liefert die Sitzungsenergie ausschließlich
+    // in Wh, ohne eigenes Einheitenfeld - deshalb explizit statt über die
+    // generische (kWh-annehmende) Einheitenerkennung oben.
+    if (energySessionKwh === undefined) {
+      const chgNrg = toNumber(pick(box, ['ChgNrg']));
+      if (chgNrg !== undefined) energySessionKwh = chgNrg / 1000;
+    }
 
     const rfidRaw = pick(box, [
-      'rfid', 'rfidTag', 'idTag', 'tokenId', 'authorizationId', 'userId',
+      // 'Uid' (AMTRON /ChargeData) ist die aktuell autorisierende RFID.
+      'rfid', 'rfidTag', 'idTag', 'Uid', 'tokenId', 'authorizationId', 'userId',
       'transaction.idTag', 'currentSession.idTag', 'session.rfid',
     ]);
 
@@ -302,19 +348,96 @@ class MennekesClient {
    * @returns {Promise<Array<object>>} normalisierte Ladevorgänge
    */
   async getChargingSessions(from, to) {
+    const rawEntries = this.sessionsProtocol === 'amtron-stateful'
+      ? await this.#fetchAmtronSessions(from, to)
+      : await this.#fetchSimpleSessions(from, to);
+
+    return rawEntries
+      .map((entry) => MennekesClient.normalizeSession(entry))
+      .filter((session) => session !== null)
+      .filter((session) => session.start >= from && session.start < to)
+      .sort((a, b) => a.start - b.start);
+  }
+
+  /**
+   * Historie über ein einzelnes GET mit Zeitraum-Query - für Firmwares, die
+   * die gesamte angefragte Liste in einer Antwort liefern.
+   * @param {Date} from
+   * @param {Date} to
+   * @returns {Promise<Array<object>>} Rohdatensätze
+   */
+  async #fetchSimpleSessions(from, to) {
     const params = {};
     if (this.sessionQuery.fromParam) params[this.sessionQuery.fromParam] = from.toISOString();
     if (this.sessionQuery.toParam) params[this.sessionQuery.toParam] = to.toISOString();
     if (this.sessionQuery.limitParam) params[this.sessionQuery.limitParam] = this.sessionQuery.limit;
 
     const payload = await this.#get(this.endpoints.sessions, params);
-    const sessions = MennekesClient.extractSessionArray(payload);
+    return MennekesClient.extractSessionArray(payload);
+  }
 
-    return sessions
-      .map((entry) => MennekesClient.normalizeSession(entry))
-      .filter((session) => session !== null)
-      .filter((session) => session.start >= from && session.start < to)
-      .sort((a, b) => a.start - b.start);
+  /**
+   * Historie über das zustandsbehaftete MENNEKES-AMTRON-Protokoll
+   * (/ChargeRecords, MHCP/1.0): eine Anfrage mit `State=Open` reserviert die
+   * Sitzung und liefert die Gesamtzahl (`RemEntries`), danach liefert jede
+   * `State=Read`-Anfrage bis zu 10 Datensätze und die verbleibende Anzahl.
+   * `State=Close` gibt die Sitzung frei.
+   *
+   * Reverse-engineert (siehe https://github.com/orlopau/amtron), nicht von
+   * MENNEKES offiziell dokumentiert - deshalb defensiv: harte Obergrenze der
+   * Lese-Durchläufe und Abbruch, sobald eine Antwort keine neuen Datensätze
+   * mehr liefert, auch wenn RemEntries etwas anderes behauptet.
+   *
+   * @param {Date} from
+   * @param {Date} to
+   * @returns {Promise<Array<object>>} Rohdatensätze
+   */
+  async #fetchAmtronSessions(from, to) {
+    const startSec = Math.floor(from.getTime() / 1000);
+    const endSec = Math.floor(to.getTime() / 1000);
+    // Bewusst fest verdrahtet statt über this.sessionQuery konfigurierbar:
+    // 'Start'/'End' sind Teil des AMTRON-Protokolls selbst, nicht einer
+    // Firmware-Eigenheit wie beim einfachen Protokoll - eine falsch
+    // konfigurierte MENNEKES_SESSIONS_FROM_PARAM dürfte diesen Aufruf nicht
+    // stillschweigend brechen.
+    const baseParams = { Start: startSec, End: endSec };
+
+    const entries = [];
+    // Obergrenze: 10 Datensätze je Lesevorgang, grosszügig für mehrere
+    // hundert Ladevorgänge im Abrechnungszeitraum - verhindert eine
+    // Endlosschleife, falls RemEntries bei abweichender Firmware nie 0 wird.
+    const MAX_READS = 500;
+
+    try {
+      const openResponse = await this.#get(this.endpoints.sessions, { ...baseParams, State: 'Open' });
+      let remaining = MennekesClient.#remainingEntries(openResponse);
+
+      for (let read = 0; remaining > 0 && read < MAX_READS; read += 1) {
+        const readResponse = await this.#get(this.endpoints.sessions, { ...baseParams, State: 'Read' });
+        const batch = MennekesClient.extractSessionArray(readResponse);
+        if (batch.length === 0) break;
+        entries.push(...batch);
+        remaining = MennekesClient.#remainingEntries(readResponse);
+      }
+    } finally {
+      // Sitzung freigeben, auch wenn oben ein Fehler auftrat - sonst bleibt
+      // sie auf der Wallbox belegt, bis sie von selbst abläuft. Best effort:
+      // ein Fehlschlag hier darf bereits gelesene Daten nicht verwerfen.
+      await this.#get(this.endpoints.sessions, { State: 'Close' }).catch(() => {});
+    }
+
+    return entries;
+  }
+
+  /**
+   * Liest die verbleibende Anzahl aus einer Open/Read-Antwort des
+   * AMTRON-Historienprotokolls.
+   * @param {*} payload
+   * @returns {number}
+   */
+  static #remainingEntries(payload) {
+    const value = toNumber(pick(payload, ['RemEntries', 'remEntries', 'remaining']));
+    return Number.isFinite(value) ? value : 0;
   }
 
   /**
@@ -332,6 +455,10 @@ class MennekesClient {
     // Deshalb hier: jeden Kandidaten prüfen und nur Arrays akzeptieren.
     const candidatePaths = [
       'sessions', 'transactions', 'items', 'results', 'entries',
+      // 'Records'/'Entries' (Großschreibung): möglicher Batch-Schlüssel der
+      // MENNEKES-AMTRON-Ladehistorie (/ChargeRecords) - die reverse-
+      // engineerte Doku lässt den exakten Namen offen (siehe Fallback unten).
+      'Records', 'Entries',
       'data.sessions', 'data.transactions', 'data.items',
       'result.sessions', 'result.transactions',
       'data', 'result', 'payload',
@@ -348,9 +475,22 @@ class MennekesClient {
       const nested = MennekesClient.extractSessionArray(single);
       if (nested.length > 0) return nested;
       // Nur als Session werten, wenn ein Startfeld erkennbar ist.
-      if (pick(single, ['start', 'startTime', 'startedAt', 'sessionStart'])) return [single];
+      if (pick(single, ['start', 'startTime', 'startedAt', 'sessionStart', 'Start'])) return [single];
     }
-    if (pick(payload, ['start', 'startTime', 'startedAt', 'sessionStart'])) return [payload];
+    if (pick(payload, ['start', 'startTime', 'startedAt', 'sessionStart', 'Start'])) return [payload];
+
+    // AMTRON-Fallback: das Batch-Ergebnis von /ChargeRecords könnte statt
+    // eines Arrays numerisch- oder namentlich indizierte Objekte auf oberster
+    // Ebene liefern (die Community-Dokumentation zeigt dafür keine
+    // eindeutige, valide JSON-Struktur). Deshalb: jede Eigenschaft neben
+    // 'RemEntries' sammeln, die wie ein Ladevorgang aussieht (Start/Stop/
+    // ChrNr vorhanden) - und NUR dann, wenn oben nichts gefunden wurde.
+    const flattened = Object.entries(payload)
+      .filter(([key]) => key !== 'RemEntries')
+      .map(([, value]) => value)
+      .filter((value) => value && typeof value === 'object'
+        && ('Start' in value || 'ChrNr' in value || 'Stop' in value));
+    if (flattened.length > 0) return flattened;
 
     return [];
   }
@@ -366,12 +506,14 @@ class MennekesClient {
     if (!entry || typeof entry !== 'object') return null;
 
     const start = toDate(pick(entry, [
-      'start', 'startTime', 'startedAt', 'sessionStart', 'timestampStart', 'begin', 'dateStart',
+      // 'Start' (MENNEKES AMTRON /ChargeRecords) ist Unix-Sekunden -
+      // toDate() erkennt das bereits an der Größenordnung.
+      'start', 'startTime', 'startedAt', 'sessionStart', 'timestampStart', 'begin', 'dateStart', 'Start',
     ]));
     if (!start) return null;
 
     const end = toDate(pick(entry, [
-      'end', 'endTime', 'stoppedAt', 'endedAt', 'sessionEnd', 'timestampStop', 'stop', 'dateEnd',
+      'end', 'endTime', 'stoppedAt', 'endedAt', 'sessionEnd', 'timestampStop', 'stop', 'dateEnd', 'Stop',
     ]));
 
     const meterStartKwh = energyToKwh(
@@ -388,6 +530,14 @@ class MennekesClient {
       pick(entry, ['energyUnit', 'unit', 'meterUnit'])
     );
 
+    // 'ChrNr' (MENNEKES AMTRON /ChargeRecords) liefert die Ladeenergie
+    // ausschließlich in Wh, ohne eigenes Einheitenfeld - deshalb explizit
+    // statt über die generische, kWh-annehmende Erkennung oben.
+    if (energyKwh === undefined) {
+      const chrNr = toNumber(pick(entry, ['ChrNr']));
+      if (chrNr !== undefined) energyKwh = chrNr / 1000;
+    }
+
     // Fallback: aus Zählerständen berechnen, wenn kein Energiefeld geliefert wird.
     if (energyKwh === undefined && meterStartKwh !== undefined && meterEndKwh !== undefined) {
       energyKwh = meterEndKwh - meterStartKwh;
@@ -400,7 +550,8 @@ class MennekesClient {
     }
 
     const rfidRaw = pick(entry, [
-      'rfid', 'rfidTag', 'idTag', 'tokenId', 'authorizationId', 'userId', 'tag', 'cardId',
+      // 'Uid' (MENNEKES AMTRON /ChargeRecords) ist die RFID der Sitzung.
+      'rfid', 'rfidTag', 'idTag', 'Uid', 'tokenId', 'authorizationId', 'userId', 'tag', 'cardId',
     ]);
 
     return {

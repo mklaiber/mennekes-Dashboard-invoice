@@ -46,12 +46,26 @@ test('Serverfehler und Drosselung gelten als wiederholbar', () => {
 test('sendet den Zustand und meldet Erfolg', async () => {
   const calls = [];
   const uplink = new Uplink({ baseUrl: 'https://x', token: 't' }, '1.0.0', {
-    post: async (path, body) => { calls.push({ path, body }); return { data: { ok: true } }; },
+    post: async (path, body) => { calls.push({ path, body }); return { data: { ok: true, normalized: null } }; },
   });
 
-  assert.strictEqual(await uplink.sendStatus({ status: 'Charging' }), true);
+  const result = await uplink.sendStatus({ status: 'Charging' });
+  assert.strictEqual(result.ok, true);
   assert.strictEqual(calls[0].path, '/status');
   assert.deepStrictEqual(calls[0].body, { status: { status: 'Charging' } });
+});
+
+test('reicht den vom Online-Tool normalisierten Zustand zurück', async () => {
+  // Genau dieser Rückgabewert speist die Home-Assistant-Sensoren (siehe
+  // haBridge.js) - der Connector interpretiert die Wallbox-Rohdaten
+  // bewusst nicht selbst.
+  const normalized = { status: 'charging', statusLabel: 'Lädt', powerKw: 11.04, rfidName: 'Max Mustermann' };
+  const uplink = new Uplink({ baseUrl: 'https://x', token: 't' }, '1.0.0', {
+    post: async () => ({ data: { ok: true, normalized } }),
+  });
+
+  const result = await uplink.sendStatus({ ChgState: 'Charging' });
+  assert.deepStrictEqual(result.normalized, normalized);
 });
 
 test('meldet einen fehlgeschlagenen Zustandsversand, ohne zu werfen', async () => {
@@ -60,7 +74,9 @@ test('meldet einen fehlgeschlagenen Zustandsversand, ohne zu werfen', async () =
   });
 
   // Ein verpasster Live-Wert darf den Connector nicht beenden.
-  assert.strictEqual(await uplink.sendStatus({}), false);
+  const result = await uplink.sendStatus({});
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.normalized, null);
 });
 
 test('bestätigt übermittelte Vorgänge anhand ihrer ID', async () => {

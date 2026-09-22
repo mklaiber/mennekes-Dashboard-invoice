@@ -8,6 +8,12 @@ RUN apk add --no-cache nodejs npm tzdata
 
 ENV NODE_ENV=production
 
+# Der HA-Builder reicht BUILD_VERSION (== version: aus config.yaml) automatisch
+# durch - damit stimmt die Version in Startprotokoll und den
+# Home-Assistant-Sensoren (Gerät "Firmware") auch nach einem Update.
+ARG BUILD_VERSION
+ENV CONNECTOR_VERSION=${BUILD_VERSION}
+
 WORKDIR /opt/connector
 
 COPY app/package.json app/package-lock.json* ./

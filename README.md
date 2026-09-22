@@ -171,14 +171,23 @@ Alternativ ohne Store: den Ordner `mennekes-connector/` in die Freigabe
 
 ### Wichtigste Optionen
 
+Die Vorgabe-Konfiguration ist bereits auf eine MENNEKES AMTRON (MHCP/1.0)
+eingestellt – Details und die Werte für andere Firmware-Generationen stehen in
+[`mennekes-connector/DOCS.md`](mennekes-connector/DOCS.md).
+
 ```yaml
-wallbox_url: "http://192.168.1.50"       # Wallbox im Heimnetz
-endpoint_status: "/api/v1/status"
-endpoint_sessions: "/api/v1/transactions"
+wallbox_url: "http://192.168.1.50:25000/MHCP/1.0"   # Wallbox im Heimnetz
+wallbox_auth_mode: query                            # AMTRON: Token als Query-Parameter
+wallbox_token: "<DevKey vom Einrichtungsdatenblatt>"
+wallbox_auth_query_param: DevKey
+endpoint_status: "/ChargeData"
+endpoint_sessions: "/ChargeRecords"
+wallbox_sessions_protocol: amtron-stateful
 target_url: "https://abrechnung.example.com"
 target_token: "<derselbe Wert wie CONNECTOR_TOKEN>"
 status_interval_seconds: 10              # Live-Werte
 sessions_interval_seconds: 900           # Ladehistorie
+mqtt_host: ""                            # optional: Home-Assistant-Sensoren, siehe unten
 ```
 
 ### Zwei Takte, zwei Verhaltensweisen
@@ -214,10 +223,21 @@ curl -H "Authorization: Bearer $CONNECTOR_TOKEN" \
      https://abrechnung.example.com/api/ingest/health
 ```
 
-### Was das Add-on nicht tut
+### Home-Assistant-Sensoren (optional, über MQTT)
 
-Es legt **keine Home-Assistant-Entitäten** an – ein reiner Vermittler, wie
-angefragt. Es steuert die Wallbox nicht, öffnet keinen Port und hat keine
+Trägt man in den Add-on-Optionen einen `mqtt_host` ein, legt der Connector
+zusätzlich ein Gerät „Mennekes Wallbox“ mit Sensoren in Home Assistant an
+(Ladeleistung, Status, Lädt/Fahrzeug-verbunden, Energie der Sitzung,
+Zählerstand, aktive Ladekarte, …) – per MQTT Discovery, ohne eigene
+Abrechnungslogik. Die Sensoren zeigen denselben Zustand, den auch das
+Online-Tool erhält; die Abrechnung bleibt allein dessen Aufgabe. Bleibt
+`mqtt_host` leer, entfällt dieser Teil vollständig. Details, die vollständige
+Liste der Entitäten und die MQTT-Optionen stehen in
+[`mennekes-connector/DOCS.md`](mennekes-connector/DOCS.md#4-home-assistant-sensoren-mqtt-einrichten--optional).
+
+### Was das Add-on sonst nicht tut
+
+Es steuert die Wallbox nicht, öffnet keinen Port und hat keine
 Bedienoberfläche.
 
 ---
@@ -356,7 +376,55 @@ deshalb **keine feste Annahme**: die Pfade sind über die `.env` konfigurierbar,
 und das Parsing der Antworten ist bewusst tolerant gegenüber unterschiedlichen
 Feldbenennungen.
 
-Vor dem ersten Produktivlauf einmal gegen die eigene Wallbox prüfen:
+### MENNEKES AMTRON (MHCP/1.0) – bereits vorkonfiguriert
+
+Für die **AMTRON**-Baureihe (Professional, Xtra, Premium – erkennbar an
+„System → REST-Schnittstelle: Aktiviert" und einer „EEBus-Stack-Version: KEO
+framework" in den Systeminformationen) ist `.env.example` bereits mit den
+echten Endpunkten vorbelegt:
+
+```dotenv
+MENNEKES_BASE_URL=http://<WALLBOX-IP>:25000/MHCP/1.0
+MENNEKES_AUTH_MODE=query
+MENNEKES_AUTH_QUERY_PARAM=DevKey
+MENNEKES_TOKEN=<DevKey / "APP-Pin" / "PIN 1">
+MENNEKES_ENDPOINT_STATUS=/ChargeData
+MENNEKES_ENDPOINT_SESSIONS=/ChargeRecords
+MENNEKES_SESSIONS_PROTOCOL=amtron-stateful
+```
+
+Zwei Besonderheiten gegenüber generischen REST-APIs:
+
+- **Der Token ist ein Query-Parameter**, kein Header (`?DevKey=…` auf jeder
+  Anfrage) – daher `MENNEKES_AUTH_MODE=query` statt `bearer`/`apikey`. Der
+  DevKey heißt in der Gerätedokumentation „APP-Pin" bzw. „PIN 1" und steht auf
+  dem **Einrichtungsdatenblatt**, das der Wallbox beilag – nicht im
+  „Betreiberpasswort" der Systemseite.
+- **Die Ladehistorie ist zustandsbehaftet**: `/ChargeRecords` verlangt erst
+  `State=Open` (liefert die Gesamtzahl), dann wiederholt `State=Read`
+  (je bis zu 10 Datensätze), zuletzt `State=Close`. `MENNEKES_SESSIONS_PROTOCOL=
+  amtron-stateful` schaltet genau dieses Verhalten ein; der einfache
+  Ein-GET-Modus (`simple`) würde hier nur eine leere oder falsche Antwort liefern.
+
+Vorab gegenprüfen:
+
+```bash
+curl -s "http://<WALLBOX-IP>:25000/MHCP/1.0/ChargeData?DevKey=<PIN1>" | jq
+```
+
+**Quelle:** Diese Pfade und Feldnamen stammen aus community-reverse-engineerter
+Dokumentation, nicht von MENNEKES offiziell veröffentlicht –
+[orlopau/amtron](https://github.com/orlopau/amtron),
+[lephisto/amtron](https://github.com/lephisto/amtron). Erwartet, aber nicht an
+einem echten Gerät verifiziert: die genaue Struktur der `/ChargeRecords`-
+Batch-Antwort. Der Parser probiert mehrere plausible Formen (siehe
+`extractSessionArray` in `src/services/mennekesClient.js`); liefert die
+Ladehistorie leere Ergebnisse trotz vorhandener Ladevorgänge, hilft ein
+`curl`-Mitschnitt der `State=Read`-Antwort weiter.
+
+### Andere Firmware-Generationen
+
+Vor dem ersten Produktivlauf gegen die eigene Wallbox prüfen:
 
 ```bash
 curl -s http://<WALLBOX-IP>/api/v1/status | jq
@@ -369,28 +437,37 @@ Passen die Pfade nicht, in der `.env` anpassen:
 MENNEKES_ENDPOINT_STATUS=/api/v1/status
 MENNEKES_ENDPOINT_SESSIONS=/api/v1/transactions
 MENNEKES_ENDPOINT_METER=            # optional, falls Zählerwerte separat kommen
+MENNEKES_SESSIONS_PROTOCOL=simple   # Standard: ein GET, Antwort ist eine Liste
 ```
 
-**Die Feldnamen innerhalb der Antwort müssen nicht angepasst werden.** Der Client
-erkennt jeweils mehrere gängige Schreibweisen:
+**Die Feldnamen innerhalb der Antwort müssen meist nicht angepasst werden.** Der
+Client erkennt jeweils mehrere gängige Schreibweisen, darunter die von AMTRON
+(`ChgState`, `ActPwr`, `ChgNrg`, `Uid`, `ChrNr`, `Start`/`Stop`):
 
 | Wert | Akzeptierte Felder (Auswahl) |
 |---|---|
-| Status | `status`, `state`, `chargePointState`, `connectorStatus`, `connectors[0].status` |
-| Leistung | `power`, `powerKw`, `activePower`, `chargingPower`, `meter.power` |
-| Energie | `energy`, `energyKwh`, `chargedEnergy`, `consumption`, `kwh` |
-| RFID | `rfid`, `rfidTag`, `idTag`, `tokenId`, `authorizationId`, `cardId` |
-| Start/Ende | `start`/`startTime`/`startedAt`, `end`/`endTime`/`stoppedAt` |
+| Status | `status`, `state`, `ChgState`, `chargePointState`, `connectorStatus`, `connectors[0].status` |
+| Leistung | `power`, `powerKw`, `ActPwr`, `activePower`, `chargingPower`, `meter.power` |
+| Energie | `energy`, `energyKwh`, `ChgNrg`/`ChrNr` (Wh), `chargedEnergy`, `consumption`, `kwh` |
+| RFID | `rfid`, `rfidTag`, `idTag`, `Uid`, `tokenId`, `authorizationId`, `cardId` |
+| Start/Ende | `start`/`startTime`/`startedAt`/`Start`, `end`/`endTime`/`stoppedAt`/`Stop` |
 
 Zusätzlich werden erkannt und umgerechnet:
 
-- **IEC-61851-Statusbuchstaben** (`A` → Standby, `B` → Verbunden, `C`/`D` → Lädt) und **OCPP-Status** (`SuspendedEV`, `Preparing`, `Faulted` …)
-- **Wattstunden statt kWh** – über `energyUnit: "Wh"` oder heuristisch bei unplausibel großen Werten
+- **IEC-61851-Statusbuchstaben** (`A` → Standby, `B` → Verbunden, `C`/`D` → Lädt), **OCPP-Status** (`SuspendedEV`, `Preparing`, `Faulted` …) und **AMTRONs `ChgState`** (`Idle`, `Charging`, `Paused`, `StandbyConnect`, `StandbyAuthorize`, `Terminated`)
+- **Wattstunden statt kWh** – über `energyUnit: "Wh"`, heuristisch bei unplausibel großen Werten, oder fest für AMTRONs einheitenlose `ChgNrg`/`ChrNr`-Felder
 - **Unix-Timestamps** in Sekunden und Millisekunden neben ISO-8601
 - **Fehlendes Energiefeld** – wird aus `meterStart`/`meterStop` berechnet
 
 Ein Datensatz ohne Startzeitpunkt oder ohne ermittelbare Energie wird verworfen,
 statt die Abrechnung zu verfälschen.
+
+**Bewusst nicht gemappt:** AMTRONs `ActCurr` ist laut Dokumentation eine
+konfigurierte Strom-Obergrenze, kein Messwert – sie erscheint deshalb nicht als
+„Strom" im Dashboard (das wäre irreführend). Eine belastbare Quelle für
+Strom/Spannung als Messwert sowie für den lebenslangen Zählerstand liefert die
+AMTRON-API in der bekannten Dokumentation nicht; das Dashboard zeigt dort „–"
+statt einen geratenen Wert.
 
 ---
 

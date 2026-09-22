@@ -72,17 +72,24 @@ class Uplink {
    * Live-Werte werden NICHT wiederholt: ein zehn Sekunden alter Messwert hat
    * keinen Wert mehr, der nächste steht ohnehin gleich an.
    *
+   * Die Antwort enthält den vom Online-Tool NORMALISIERTEN Zustand (Status als
+   * Klartext, kW statt herstellerspezifischer Rohwerte, aufgelöster
+   * RFID-Name). Der Connector interpretiert die Wallbox-Rohdaten bewusst
+   * nicht selbst - das würde die Deutung an zwei Stellen halten, die über
+   * kurz oder lang auseinanderliefen. Home-Assistant-Sensoren (siehe
+   * lib/haBridge.js) werden deshalb aus GENAU diesem Rückgabewert gespeist.
+   *
    * @param {object} status Rohantwort der Wallbox
-   * @returns {Promise<boolean>} true bei Erfolg
+   * @returns {Promise<{ok:boolean, normalized:object|null}>}
    */
   async sendStatus(status) {
     try {
-      await this.http.post('/status', { status });
-      return true;
+      const { data } = await this.http.post('/status', { status });
+      return { ok: true, normalized: data?.normalized || null };
     } catch (error) {
       const info = Uplink.classify(error);
       logger[info.retryable ? 'warn' : 'error'](`Zustand nicht übermittelt: ${info.message}`);
-      return false;
+      return { ok: false, normalized: null };
     }
   }
 

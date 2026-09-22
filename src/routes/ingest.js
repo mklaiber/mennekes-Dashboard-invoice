@@ -76,7 +76,13 @@ function createIngestRouter({ liveFeed }) {
     // Direkt an alle offenen Dashboards weiterreichen.
     liveFeed.publish(state);
 
-    res.json({ ok: true, subscribers: liveFeed.subscriberCount });
+    // Der normalisierte Zustand geht in der Antwort zurück, damit der
+    // Connector ihn unverändert an Home Assistant weiterreichen kann (siehe
+    // mennekes-connector/app/lib/haBridge.js). So gibt es für die Deutung der
+    // Wallbox-Rohdaten - Statuscodes, Watt-vs-kW, RFID-Zuordnung - genau eine
+    // Stelle: hier. Der Connector müsste sie sonst ein zweites Mal nachbauen,
+    // und beide Stände liefen über kurz oder lang auseinander.
+    res.json({ ok: true, subscribers: liveFeed.subscriberCount, normalized: state });
   }));
 
   /**

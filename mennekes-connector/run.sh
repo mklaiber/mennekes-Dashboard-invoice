@@ -12,7 +12,9 @@ export WALLBOX_AUTH_MODE="$(bashio::config 'wallbox_auth_mode')"
 export WALLBOX_USERNAME="$(bashio::config 'wallbox_username')"
 export WALLBOX_PASSWORD="$(bashio::config 'wallbox_password')"
 export WALLBOX_TOKEN="$(bashio::config 'wallbox_token')"
+export WALLBOX_AUTH_QUERY_PARAM="$(bashio::config 'wallbox_auth_query_param')"
 export WALLBOX_VERIFY_TLS="$(bashio::config 'wallbox_verify_tls')"
+export WALLBOX_SESSIONS_PROTOCOL="$(bashio::config 'wallbox_sessions_protocol')"
 
 export ENDPOINT_STATUS="$(bashio::config 'endpoint_status')"
 export ENDPOINT_SESSIONS="$(bashio::config 'endpoint_sessions')"
@@ -27,6 +29,15 @@ export SESSIONS_INTERVAL_SECONDS="$(bashio::config 'sessions_interval_seconds')"
 export HISTORY_DAYS="$(bashio::config 'history_days')"
 
 export LOG_LEVEL="$(bashio::config 'log_level')"
+
+export MQTT_HOST="$(bashio::config 'mqtt_host')"
+export MQTT_PORT="$(bashio::config 'mqtt_port')"
+export MQTT_USERNAME="$(bashio::config 'mqtt_username')"
+export MQTT_PASSWORD="$(bashio::config 'mqtt_password')"
+export MQTT_SSL="$(bashio::config 'mqtt_ssl')"
+export MQTT_DISCOVERY_PREFIX="$(bashio::config 'mqtt_discovery_prefix')"
+export MQTT_NODE_ID="$(bashio::config 'mqtt_node_id')"
+export MQTT_DEVICE_NAME="$(bashio::config 'mqtt_device_name')"
 
 # /data überlebt Neustarts und Add-on-Updates: dort liegt die Warteschlange.
 export STATE_DIR="/data"
@@ -43,5 +54,10 @@ bashio::log.info "Starte Mennekes Wallbox Connector ..."
 bashio::log.info "Wallbox:     ${WALLBOX_URL}"
 bashio::log.info "Ziel:        ${TARGET_URL}"
 bashio::log.info "Takt:        Status alle ${STATUS_INTERVAL_SECONDS}s, Historie alle ${SESSIONS_INTERVAL_SECONDS}s"
+if [ -n "${MQTT_HOST}" ] && [ "${MQTT_HOST}" != "null" ]; then
+  bashio::log.info "MQTT:        ${MQTT_HOST}:${MQTT_PORT} (Home-Assistant-Sensoren aktiv)"
+else
+  bashio::log.info "MQTT:        nicht konfiguriert (keine Home-Assistant-Sensoren)"
+fi
 
 exec node /opt/connector/index.js

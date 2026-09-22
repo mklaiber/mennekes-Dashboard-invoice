@@ -1,5 +1,23 @@
 # Änderungsverlauf
 
+## 1.1.0
+
+- Optionale Home-Assistant-Sensoren über MQTT Discovery: legt bei gesetztem
+  `mqtt_host` ein Gerät „Mennekes Wallbox" mit Sensoren für Ladeleistung,
+  Status, Lädt/Fahrzeug-verbunden, Energie der Sitzung, Zählerstand, Strom,
+  Spannung und aktive Ladekarte an. Zeigt bei anhaltenden Fehlversuchen oder
+  beim Beenden „nicht verfügbar", statt veraltete Werte stehen zu lassen.
+  Ohne `mqtt_host` bleibt das Add-on unverändert ein reiner Vermittler ohne
+  Entitäten.
+- Vorgabe-Konfiguration jetzt auf eine MENNEKES AMTRON (MHCP/1.0) eingestellt:
+  `wallbox_auth_mode: query` mit `wallbox_auth_query_param: DevKey`,
+  `endpoint_status: /ChargeData`, `endpoint_sessions: /ChargeRecords` und der
+  neue `wallbox_sessions_protocol: amtron-stateful` für deren
+  zustandsbehaftete Ladehistorie (Open/Read/Close). Andere
+  Firmware-Generationen: Werte wie gewohnt in den Optionen anpassen.
+- Neue Option `wallbox_auth_query_param` für Wallboxen, die den Token als
+  Query-Parameter statt als Header verlangen (`wallbox_auth_mode: query`).
+
 ## 1.0.0
 
 Erste Fassung.

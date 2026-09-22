@@ -8,7 +8,7 @@
 # =============================================================================
 
 name: Mennekes Wallbox Connector
-version: "1.0.0"
+version: "1.1.0"
 slug: mennekes_connector
 description: >-
   Liest die Ladedaten einer MENNEKES Wallbox im Heimnetz aus und übermittelt sie
@@ -34,15 +34,25 @@ host_network: false
 # Verfügung und wird von Home Assistant persistiert. Dort liegt die
 # Warteschlange der noch nicht zugestellten Ladevorgänge.
 
+# Vorbelegt für eine MENNEKES AMTRON (MHCP/1.0-REST-Schnittstelle, erkennbar
+# an "System → REST-Schnittstelle: Aktiviert" und einer "EEBus-Stack-Version:
+# KEO framework" in den Systeminformationen der Wallbox). Für andere
+# Firmware-Generationen die Werte unten anpassen - siehe DOCS.md.
 options:
-  wallbox_url: "http://192.168.1.50"
-  wallbox_auth_mode: none
+  wallbox_url: "http://192.168.1.50:25000/MHCP/1.0"
+  wallbox_auth_mode: query
   wallbox_username: ""
   wallbox_password: ""
+  # Der "DevKey" (Gerätedokumentation: "APP-Pin"/"PIN 1") steht auf dem
+  # Einrichtungsdatenblatt, das der Wallbox beilag.
   wallbox_token: ""
-  endpoint_status: "/api/v1/status"
-  endpoint_sessions: "/api/v1/transactions"
+  wallbox_auth_query_param: DevKey
+  endpoint_status: "/ChargeData"
+  endpoint_sessions: "/ChargeRecords"
   endpoint_meter: ""
+  # AMTRONs Ladehistorie ist zustandsbehaftet (Open/Read/Close) - "simple"
+  # (ein einzelner GET) würde hier nur eine leere Antwort liefern.
+  wallbox_sessions_protocol: amtron-stateful
   target_url: "https://abrechnung.example.com"
   target_token: ""
   status_interval_seconds: 10
@@ -51,17 +61,30 @@ options:
   verify_tls: true
   wallbox_verify_tls: true
   log_level: info
+  # Home-Assistant-Sensoren über MQTT - optional. Leer lassen, um sie zu
+  # deaktivieren. Läuft das Mosquitto-Add-on bereits, heißt der Broker im
+  # Docker-Netz üblicherweise "core-mosquitto" (Port 1883, ohne SSL).
+  mqtt_host: ""
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_ssl: false
+  mqtt_discovery_prefix: homeassistant
+  mqtt_node_id: mennekes_wallbox
+  mqtt_device_name: "Mennekes Wallbox"
 
 schema:
   # --- Wallbox im Heimnetz --------------------------------------------------
   wallbox_url: url
-  wallbox_auth_mode: "list(none|basic|bearer|apikey)"
+  wallbox_auth_mode: "list(none|basic|bearer|apikey|query)"
   wallbox_username: str?
   wallbox_password: password?
   wallbox_token: password?
+  wallbox_auth_query_param: str?
   endpoint_status: str
   endpoint_sessions: str
   endpoint_meter: str?
+  wallbox_sessions_protocol: "list(simple|amtron-stateful)"
   wallbox_verify_tls: bool
 
   # --- Online-Tool ----------------------------------------------------------
@@ -77,3 +100,13 @@ schema:
   history_days: "int(1,365)"
 
   log_level: "list(debug|info|warn|error)"
+
+  # --- Home Assistant: Sensoren über MQTT (optional, siehe DOCS.md) --------
+  mqtt_host: str?
+  mqtt_port: port
+  mqtt_username: str?
+  mqtt_password: password?
+  mqtt_ssl: bool
+  mqtt_discovery_prefix: str
+  mqtt_node_id: str
+  mqtt_device_name: str

@@ -23,6 +23,14 @@ const logger = require('./lib/logger');
 const Wallbox = require('./lib/wallbox');
 const Uplink = require('./lib/uplink');
 const Queue = require('./lib/queue');
+const mqttClient = require('./lib/mqttClient');
+const { HomeAssistantBridge, topicsFor } = require('./lib/haBridge');
+
+/** Nach so vielen aufeinanderfolgenden Fehlversuchen gelten die
+ *  Home-Assistant-Entities als "nicht verfügbar" statt stumm veraltete Werte
+ *  zu zeigen. Bei 10s-Takt sind das ~30s - kurz genug, um im Dashboard
+ *  aufzufallen, lang genug, um eine einzelne Störung nicht als Ausfall zu werten. */
+const HA_UNAVAILABLE_AFTER_FAILURES = 3;
 
 /** Paketgröße beim Senden - wird beim Selbsttest an die Gegenstelle angepasst. */
 let batchSize = 100;
@@ -77,6 +85,31 @@ async function main() {
   logger.info(`Connector ${config.version} gestartet.`);
   logger.info(`Offene Ladevorgänge in der Warteschlange: ${queue.size}`);
 
+  // ------------------------------------------------- Home Assistant (MQTT)
+  // Optional und auto-erkennend: fehlt der Broker (weder manuell konfiguriert
+  // noch über den Home-Assistant-Dienst gefunden, siehe run.sh), bleiben die
+  // Sensoren einfach weg - kein Fehlerfall, nicht jede Installation hat MQTT.
+  let bridge = null;
+  let mqttConn = null;
+  if (config.mqtt.enabled) {
+    try {
+      const topics = topicsFor(config.mqtt.nodeId);
+      mqttConn = mqttClient.connect(config.mqtt, topics.availability);
+      bridge = new HomeAssistantBridge(config.mqtt, mqttConn.publisher, logger);
+
+      mqttConn.whenConnected()
+        .then(() => logger.info(`MQTT verbunden: ${mqttClient.buildUrl(config.mqtt)}`))
+        .catch((error) => logger.warn(`MQTT-Erstverbindung fehlgeschlagen, Connector arbeitet im Hintergrund weiter: ${error.message}`));
+
+      logger.info(`Home-Assistant-Sensoren aktiv (Gerät "${config.mqtt.deviceName}").`);
+    } catch (error) {
+      logger.warn(`Home-Assistant-Anbindung (MQTT) konnte nicht gestartet werden: ${error.message}`);
+      bridge = null;
+    }
+  } else {
+    logger.info('Home-Assistant-Sensoren deaktiviert (kein MQTT-Broker konfiguriert).');
+  }
+
   // --- Selbsttest beim Start. Nicht abbrechen, wenn etwas fehlt: eine Wallbox
   // --- kann kurz nach einem Stromausfall noch booten, das Internet kann kurz
   // --- weg sein. Der Betrieb läuft an und die Takte versuchen es erneut.
@@ -97,23 +130,53 @@ async function main() {
 
   // ----------------------------------------------------------- Live-Zustand
   let statusFailures = 0;
+  let haUnavailableNotified = false;
 
   async function statusTick() {
+    let normalized = null;
+    let wallboxError = null;
+
     try {
       const status = await wallbox.getStatus();
-      await uplink.sendStatus(status);
+      // sendStatus() gibt den vom Online-Tool NORMALISIERTEN Zustand zurück
+      // (Status als Klartext, kW, aufgelöster RFID-Name) - genau der speist
+      // die Home-Assistant-Sensoren unten. Der Connector deutet die
+      // Wallbox-Rohdaten bewusst nicht selbst: das würde die Interpretation
+      // an zwei Stellen halten, die über kurz oder lang auseinanderliefen.
+      const sent = await uplink.sendStatus(status); // sendStatus() protokolliert eigene Fehlschläge selbst
+      normalized = sent.ok ? sent.normalized : null;
+    } catch (error) {
+      wallboxError = error;
+    }
 
+    if (normalized) {
       if (statusFailures > 0) {
         logger.info(`Wallbox wieder erreichbar (nach ${statusFailures} Fehlversuchen).`);
-        statusFailures = 0;
       }
-    } catch (error) {
-      statusFailures += 1;
-      // Nicht bei jedem Versuch schreien: bei einer über Nacht abgeschalteten
-      // Wallbox liefe das Protokoll sonst voll.
-      if (statusFailures === 1 || statusFailures % 30 === 0) {
-        logger.warn(`Wallbox nicht erreichbar (Versuch ${statusFailures}): ${error.message}`);
+      statusFailures = 0;
+      haUnavailableNotified = false;
+
+      if (bridge) {
+        await bridge.publishState(normalized).catch((error) => {
+          logger.warn(`Home-Assistant-Sensoren nicht aktualisiert: ${error.message}`);
+        });
       }
+      return;
+    }
+
+    // Kein Zustand zum Veröffentlichen - entweder war die Wallbox nicht
+    // erreichbar (Meldung unten) oder das Online-Tool hat die Sendung
+    // abgelehnt (von sendStatus() bereits geloggt). Beides zählt für die
+    // Home-Assistant-Verfügbarkeit als Fehlversuch.
+    statusFailures += 1;
+    // Nicht bei jedem Versuch schreien: bei einer über Nacht abgeschalteten
+    // Wallbox liefe das Protokoll sonst voll.
+    if (wallboxError && (statusFailures === 1 || statusFailures % 30 === 0)) {
+      logger.warn(`Wallbox nicht erreichbar (Versuch ${statusFailures}): ${wallboxError.message}`);
+    }
+    if (bridge && !haUnavailableNotified && statusFailures >= HA_UNAVAILABLE_AFTER_FAILURES) {
+      haUnavailableNotified = true;
+      await bridge.setAvailable(false).catch(() => {});
     }
   }
 
@@ -169,7 +232,7 @@ async function main() {
   const sessionsTimer = setInterval(() => { sessionsTick().catch(() => {}); }, config.sessionsIntervalMs);
 
   // ------------------------------------------------------- Herunterfahren
-  function shutdown(signal) {
+  async function shutdown(signal) {
     logger.info(`${signal} empfangen - beende.`);
     clearInterval(statusTimer);
     clearInterval(sessionsTimer);
@@ -177,11 +240,28 @@ async function main() {
     if (stats.pending > 0) {
       logger.warn(`${stats.pending} Vorgang/Vorgänge noch nicht zugestellt - bleiben gespeichert.`);
     }
+
+    // "offline" melden, bevor der Prozess verschwindet - das Last-Will-
+    // Testament des MQTT-Clients greift nur bei einem harten Absturz.
+    if (bridge) await bridge.close().catch(() => {});
+    if (mqttConn) await new Promise((resolve) => mqttConn.client.end(false, {}, resolve)).catch(() => {});
+
     process.exit(0);
   }
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  // Erzwungenes Beenden, falls das MQTT-Abmelden hängen bleibt - ein
+  // Add-on-Neustart darf nicht an einem trägen Broker scheitern.
+  function shutdownWithTimeout(signal) {
+    const forceExit = setTimeout(() => {
+      logger.warn('Herunterfahren dauert zu lange - erzwinge Beenden.');
+      process.exit(1);
+    }, 5000);
+    forceExit.unref?.();
+    shutdown(signal).finally(() => clearTimeout(forceExit));
+  }
+
+  process.on('SIGTERM', () => shutdownWithTimeout('SIGTERM'));
+  process.on('SIGINT', () => shutdownWithTimeout('SIGINT'));
 
   process.on('unhandledRejection', (reason) => {
     logger.error('Unbehandelte Ablehnung:', reason instanceof Error ? reason.message : String(reason));

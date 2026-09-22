@@ -101,3 +101,63 @@ test('nennt alle Probleme auf einmal', () => {
     }
   });
 });
+
+test('AMTRON: "query"-Auth verlangt Token UND Query-Parameternamen', () => {
+  withEnv({ WALLBOX_AUTH_MODE: 'query' }, () => {
+    assert.throws(() => options.load(), /wallbox_token/);
+  });
+  withEnv({ WALLBOX_AUTH_MODE: 'query', WALLBOX_TOKEN: '1234' }, () => {
+    assert.throws(() => options.load(), /wallbox_auth_query_param/);
+  });
+  withEnv({ WALLBOX_AUTH_MODE: 'query', WALLBOX_TOKEN: '1234', WALLBOX_AUTH_QUERY_PARAM: 'DevKey' }, () => {
+    const config = options.load();
+    assert.strictEqual(config.wallbox.authMode, 'query');
+    assert.strictEqual(config.wallbox.authQueryParam, 'DevKey');
+  });
+});
+
+
+test('MQTT ist per Default aktiviert, aber ohne Host wirkungslos', () => {
+  withEnv({}, () => {
+    // Kein MQTT_HOST gesetzt - im Add-on käme das vor, wenn weder eine
+    // manuelle Adresse noch der Home-Assistant-Dienst einen Broker liefert.
+    assert.strictEqual(options.load().mqtt.enabled, false);
+  });
+});
+
+test('MQTT aktiviert sich automatisch, sobald ein Host bekannt ist', () => {
+  withEnv({ MQTT_HOST: 'core-mosquitto' }, () => {
+    const config = options.load();
+    assert.strictEqual(config.mqtt.enabled, true);
+    assert.strictEqual(config.mqtt.host, 'core-mosquitto');
+    assert.strictEqual(config.mqtt.port, 1883);
+  });
+});
+
+test('MQTT_ENABLED=false gewinnt, auch mit gesetztem Host', () => {
+  withEnv({ MQTT_HOST: 'core-mosquitto', MQTT_ENABLED: 'false' }, () => {
+    assert.strictEqual(options.load().mqtt.enabled, false);
+  });
+});
+
+test('nutzt sinnvolle Defaults für Discovery-Prefix und Knotennamen', () => {
+  withEnv({ MQTT_HOST: 'core-mosquitto' }, () => {
+    const config = options.load();
+    assert.strictEqual(config.mqtt.discoveryPrefix, 'homeassistant');
+    assert.strictEqual(config.mqtt.nodeId, 'mennekes_wallbox');
+  });
+});
+
+test('macht einen frei eingegebenen Knotennamen MQTT-themen-tauglich', () => {
+  withEnv({ MQTT_HOST: 'core-mosquitto', MQTT_NODE_ID: 'Garage Wallbox #2!' }, () => {
+    assert.strictEqual(options.load().mqtt.nodeId, 'garage_wallbox_2');
+  });
+});
+
+test('fehlende MQTT-Konfiguration lässt die übrige Prüfung unberührt', () => {
+  // MQTT ist optional - eine fehlende Broker-Adresse darf den Start nicht
+  // verhindern, anders als ein fehlendes target_token.
+  withEnv({}, () => {
+    assert.doesNotThrow(() => options.load());
+  });
+});

@@ -1,6 +1,6 @@
 {
   "name": "mennekes-wallbox-connector",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Home-Assistant-Add-on: liest die Wallbox im Heimnetz und übermittelt die Daten ausgehend an die Online-Abrechnung",
   "main": "index.js",
@@ -12,7 +12,8 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "axios": "^1.7.7"
+    "axios": "^1.7.7",
+    "mqtt": "^5.16.0"
   },
   "license": "MIT"
 }

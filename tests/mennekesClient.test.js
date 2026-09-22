@@ -164,7 +164,9 @@ describe('MennekesClient', () => {
 
       const state = await client.getLiveStatus();
 
-      expect(http.get).toHaveBeenCalledWith('/api/v1/status', { params: undefined });
+      // #get() merged jetzt immer (ggf. leere) Auth-Query-Parameter ein - ein
+      // no-op ausserhalb des 'query'-Auth-Modus, aber kein `undefined` mehr.
+      expect(http.get).toHaveBeenCalledWith('/api/v1/status', { params: {} });
       expect(state.powerKw).toBe(11.04);
     });
 
@@ -302,6 +304,280 @@ describe('MennekesClient', () => {
       const result = await badClient.ping();
       expect(result.reachable).toBe(false);
       expect(result.error).toContain('ECONNREFUSED');
+    });
+  });
+
+  // ==========================================================================
+  // MENNEKES AMTRON (MHCP/1.0) - reverse-engineerte, aber konkrete Ziel-API
+  // dieses Projekts. Siehe https://github.com/orlopau/amtron und
+  // https://github.com/lephisto/amtron.
+  // ==========================================================================
+
+  describe('AMTRON: DevKey als Query-Parameter ("query"-Auth-Modus)', () => {
+    it('hängt den Token als Query-Parameter an jede Anfrage', async () => {
+      const http = fakeHttp({ '/ChargeData': { ChgState: 'Idle' } });
+      const client = new MennekesClient({
+        httpClient: http, authMode: 'query', authQueryParam: 'DevKey', token: '1234',
+        endpoints: { status: '/ChargeData' },
+      });
+
+      await client.getLiveStatus();
+
+      expect(http.calls[0].params).toEqual({ DevKey: '1234' });
+    });
+
+    it('mischt Auth-Parameter und fachliche Parameter', async () => {
+      const http = fakeHttp({ '/ChargeRecords': { RemEntries: 0 } });
+      const client = new MennekesClient({
+        httpClient: http, authMode: 'query', authQueryParam: 'DevKey', token: '1234',
+        sessionsProtocol: 'amtron-stateful', endpoints: { sessions: '/ChargeRecords' },
+      });
+
+      await client.getChargingSessions(new Date('2026-03-01'), new Date('2026-04-01'));
+
+      expect(http.calls[0].params).toMatchObject({ DevKey: '1234', State: 'Open' });
+    });
+
+    it('sendet ohne Token keinen Query-Parameter (kein leerer Wert)', async () => {
+      const http = fakeHttp({ '/ChargeData': { ChgState: 'Idle' } });
+      const client = new MennekesClient({
+        httpClient: http, authMode: 'query', authQueryParam: 'DevKey', token: undefined,
+        endpoints: { status: '/ChargeData' },
+      });
+
+      await client.getLiveStatus();
+
+      expect(http.calls[0].params).toEqual({});
+    });
+
+    it('bleibt außerhalb des query-Modus wirkungslos, auch mit gesetztem Token', async () => {
+      const http = fakeHttp({ '/ChargeData': { ChgState: 'Idle' } });
+      const client = new MennekesClient({
+        httpClient: http, authMode: 'bearer', authQueryParam: 'DevKey', token: '1234',
+        endpoints: { status: '/ChargeData' },
+      });
+
+      await client.getLiveStatus();
+
+      expect(http.calls[0].params).toEqual({});
+    });
+  });
+
+  describe('AMTRON: /ChargeData-Feldnamen', () => {
+    it('erkennt ChgState, ActPwr, ChgNrg und Uid', () => {
+      const state = MennekesClient.normalizeStatus({
+        ChgState: 'Charging', ActPwr: 11040, ChgNrg: 8420, Uid: '04A1B2C3',
+      });
+
+      expect(state.status).toBe('charging');
+      expect(state.powerKw).toBe(11.04);
+      expect(state.energySessionKwh).toBe(8.42);
+      expect(state.rfidRaw).toBe('04A1B2C3');
+      expect(state.rfid).toBe('04a1b2c3');
+    });
+
+    it('versteht die AMTRON-spezifischen Zwischenzustände', () => {
+      expect(MennekesClient.normalizeStatus({ ChgState: 'Paused' }).status).toBe('connected');
+      expect(MennekesClient.normalizeStatus({ ChgState: 'StandbyConnect' }).status).toBe('connected');
+      expect(MennekesClient.normalizeStatus({ ChgState: 'StandbyAuthorize' }).status).toBe('connected');
+      expect(MennekesClient.normalizeStatus({ ChgState: 'Idle' }).status).toBe('standby');
+    });
+
+    it('interpretiert ChgNrg als Wattstunden ohne separates Einheitenfeld', () => {
+      // Ohne die AMTRON-Sonderbehandlung würde die generische Erkennung
+      // ChgNrg faelschlich als bereits-kWh lesen (8420 kWh statt 8.42 kWh).
+      const state = MennekesClient.normalizeStatus({ ChgState: 'Charging', ChgNrg: 8420 });
+      expect(state.energySessionKwh).toBe(8.42);
+    });
+
+    it('bildet keine Messwerte für Strom/Spannung, die AMTRON nicht liefert', () => {
+      // ActCurr ist laut Dokumentation eine konfigurierte Obergrenze, kein
+      // Messwert - sie darf nicht faelschlich als "Strom" angezeigt werden.
+      const state = MennekesClient.normalizeStatus({ ChgState: 'Charging', ActPwr: 1000, ActCurr: 16 });
+      expect(state.currentA).toBeNull();
+      expect(state.voltageV).toBeNull();
+    });
+  });
+
+  describe('AMTRON: /ChargeRecords-Feldnamen', () => {
+    it('erkennt Start, Stop, ChrNr und Uid', () => {
+      const session = MennekesClient.normalizeSession({
+        Start: 1772688600, Stop: 1772700300, ChrNr: 24500, Uid: '04A1B2C3',
+      });
+
+      expect(session.start.toISOString()).toBe(new Date(1772688600 * 1000).toISOString());
+      expect(session.end.toISOString()).toBe(new Date(1772700300 * 1000).toISOString());
+      expect(session.energyKwh).toBe(24.5);
+      expect(session.durationSeconds).toBe(11700);
+      expect(session.rfidRaw).toBe('04A1B2C3');
+    });
+
+    it('interpretiert ChrNr als Wattstunden ohne separates Einheitenfeld', () => {
+      const session = MennekesClient.normalizeSession({ Start: 1772688600, ChrNr: 24500, Uid: 'X' });
+      expect(session.energyKwh).toBe(24.5);
+    });
+
+    it('synthetisiert eine ID, da AMTRON keine mitliefert', () => {
+      const session = MennekesClient.normalizeSession({ Start: 1772688600, ChrNr: 100, Uid: 'AABB' });
+      expect(session.id).toContain('AABB');
+    });
+  });
+
+  describe('AMTRON: zustandsbehaftetes Historienprotokoll (Open/Read/Close)', () => {
+    /** Simuliert die Open/Read/Close-Zustandsmaschine von /ChargeRecords. */
+    function fakeAmtronHistory(batches) {
+      const calls = [];
+      let readIndex = 0;
+      return {
+        calls,
+        get: jest.fn(async (path, opts) => {
+          calls.push({ path, params: opts.params });
+          const state = opts.params.State;
+          if (state === 'Open') {
+            const total = batches.reduce((sum, batch) => sum + batch.length, 0);
+            return { data: { RemEntries: total } };
+          }
+          if (state === 'Read') {
+            const batch = batches[readIndex] || [];
+            readIndex += 1;
+            const remaining = batches.slice(readIndex).reduce((sum, b) => sum + b.length, 0);
+            return { data: { RemEntries: remaining, Records: batch } };
+          }
+          if (state === 'Close') return { data: {} };
+          throw new Error(`unerwarteter State: ${state}`);
+        }),
+      };
+    }
+
+    it('durchläuft Open, mehrere Read-Schritte und Close', async () => {
+      const http = fakeAmtronHistory([
+        [{ Start: 1772688600, Stop: 1772700300, ChrNr: 24500, Uid: 'AABB' }],
+        [{ Start: 1772775000, Stop: 1772786700, ChrNr: 32250, Uid: 'CCDD' }],
+      ]);
+      const client = new MennekesClient({
+        httpClient: http, sessionsProtocol: 'amtron-stateful',
+        endpoints: { sessions: '/ChargeRecords' },
+      });
+
+      const sessions = await client.getChargingSessions(new Date('2026-03-01'), new Date('2026-04-01'));
+
+      expect(sessions).toHaveLength(2);
+      expect(http.calls.map((call) => call.params.State)).toEqual(['Open', 'Read', 'Read', 'Close']);
+    });
+
+    it('sendet Start/End als Unix-Sekunden, unabhängig von sessionQuery', async () => {
+      const http = fakeAmtronHistory([]);
+      const client = new MennekesClient({
+        httpClient: http, sessionsProtocol: 'amtron-stateful',
+        endpoints: { sessions: '/ChargeRecords' },
+        // Absichtlich andere Parameternamen konfiguriert - amtron-stateful
+        // muss sie ignorieren und fest 'Start'/'End' verwenden.
+        sessionQuery: { fromParam: 'from', toParam: 'to' },
+      });
+
+      await client.getChargingSessions(new Date('2026-03-01T00:00:00Z'), new Date('2026-04-01T00:00:00Z'));
+
+      expect(http.calls[0].params).toMatchObject({
+        Start: Math.floor(new Date('2026-03-01T00:00:00Z').getTime() / 1000),
+        End: Math.floor(new Date('2026-04-01T00:00:00Z').getTime() / 1000),
+      });
+    });
+
+    it('schließt die Sitzung auch, wenn Read fehlschlägt', async () => {
+      const calls = [];
+      const http = {
+        get: jest.fn(async (path, opts) => {
+          calls.push(opts.params.State);
+          if (opts.params.State === 'Open') return { data: { RemEntries: 5 } };
+          if (opts.params.State === 'Read') throw new Error('ECONNRESET');
+          return { data: {} };
+        }),
+      };
+      const client = new MennekesClient({
+        httpClient: http, sessionsProtocol: 'amtron-stateful', retries: 0,
+        endpoints: { sessions: '/ChargeRecords' },
+      });
+
+      await expect(client.getChargingSessions(new Date('2026-03-01'), new Date('2026-04-01')))
+        .rejects.toThrow();
+
+      // Close muss trotz des Fehlers gesendet worden sein - sonst bleibt die
+      // Sitzung auf dem Gerät belegt.
+      expect(calls).toContain('Close');
+    });
+
+    it('bricht ab, wenn eine Read-Antwort leer ist, obwohl RemEntries > 0 bleibt', async () => {
+      // Schutz gegen eine Endlosschleife bei abweichendem Firmware-Verhalten.
+      const http = {
+        get: jest.fn(async (path, opts) => {
+          if (opts.params.State === 'Open') return { data: { RemEntries: 999 } };
+          if (opts.params.State === 'Read') return { data: { RemEntries: 999, Records: [] } };
+          return { data: {} };
+        }),
+      };
+      const client = new MennekesClient({
+        httpClient: http, sessionsProtocol: 'amtron-stateful',
+        endpoints: { sessions: '/ChargeRecords' },
+      });
+
+      const sessions = await client.getChargingSessions(new Date('2026-03-01'), new Date('2026-04-01'));
+
+      expect(sessions).toEqual([]);
+      // Genau EIN Read-Versuch, kein endloses Nachfragen.
+      expect(http.get.mock.calls.filter((call) => call[1].params.State === 'Read')).toHaveLength(1);
+    });
+
+    it('verwirft Datensätze außerhalb des angefragten Zeitraums client-seitig', async () => {
+      // Selbst wenn die Wallbox Start/End nicht exakt beachtet.
+      const http = fakeAmtronHistory([[
+        { Start: 1772688600, Stop: 1772700300, ChrNr: 24500, Uid: 'IN-RANGE' },
+        { Start: 1700000000, Stop: 1700003600, ChrNr: 5000, Uid: 'TOO-OLD' },
+      ]]);
+      const client = new MennekesClient({
+        httpClient: http, sessionsProtocol: 'amtron-stateful',
+        endpoints: { sessions: '/ChargeRecords' },
+      });
+
+      const sessions = await client.getChargingSessions(new Date('2026-03-01'), new Date('2026-04-01'));
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].rfidRaw).toBe('IN-RANGE');
+    });
+
+    it('verwendet weiterhin das einfache Protokoll, wenn nicht "amtron-stateful" konfiguriert ist', async () => {
+      const http = fakeHttp({ '/api/v1/transactions': { transactions: [] } });
+      const client = new MennekesClient({ httpClient: http });
+
+      await client.getChargingSessions(new Date('2026-03-01'), new Date('2026-04-01'));
+
+      // Kein State=Open/Read/Close - ein einzelner GET wie bisher.
+      expect(http.calls).toHaveLength(1);
+      expect(http.calls[0].params.State).toBeUndefined();
+    });
+  });
+
+  describe('AMTRON: extractSessionArray-Fallbacks', () => {
+    it('findet Datensätze unter "Records" (Großschreibung)', () => {
+      const result = MennekesClient.extractSessionArray({
+        RemEntries: 0, Records: [{ Start: 1, ChrNr: 100, Uid: 'X' }],
+      });
+      expect(result).toHaveLength(1);
+    });
+
+    it('erkennt flach abgelegte Datensätze ohne Array-Hülle', () => {
+      // Die Community-Dokumentation zeigt für /ChargeRecords keine eindeutige
+      // JSON-Struktur - dieser Fallback fängt eine index-artige Ablage ab.
+      const result = MennekesClient.extractSessionArray({
+        RemEntries: 0,
+        first: { Start: 1, ChrNr: 100, Uid: 'A' },
+        second: { Start: 2, ChrNr: 200, Uid: 'B' },
+      });
+      expect(result).toHaveLength(2);
+    });
+
+    it('ignoriert RemEntries selbst als Datensatz-Kandidat', () => {
+      const result = MennekesClient.extractSessionArray({ RemEntries: 5 });
+      expect(result).toEqual([]);
     });
   });
 });
