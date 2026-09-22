@@ -144,3 +144,61 @@ describe('Kartenzuordnung über die API', () => {
     expect(page.text).toContain('Nicht zugeordnete Karten');
   });
 });
+
+describe('Dialoge im Markup', () => {
+  // Der erste Anlauf baute die Dialoge in JavaScript zusammen und erfand dabei
+  // Klassennamen, die es im Stylesheet nicht gibt. Sie oeffneten sich, die
+  // Daten liefen korrekt durch - nur sah man ein durchsichtiges Formular ohne
+  // Hintergrund quer ueber der Seite. Kein Test schlug fehl, weil keiner
+  // hinsah. Diese Zusicherungen fangen den Rueckfall ab.
+  const COMPONENT_CLASSES = [
+    'md-dialog__panel',   // ohne dies ist der Dialog durchsichtig
+    'md-dialog__title',
+    'md-field__input',
+    'md-field__select',
+    'md-field__textarea',
+    'md-field__label',
+    'md-switch__track',
+  ];
+
+  it('benutzt ausschließlich vorhandene Komponentenklassen', async () => {
+    const page = await admin.agent.get('/fuhrpark').expect(200);
+
+    COMPONENT_CLASSES.forEach((className) => {
+      expect(page.text).toContain(className);
+    });
+
+    // Klassen, die es nie gab - ein Tippfehler faellt sonst nur visuell auf.
+    expect(page.text).not.toMatch(/class="[^"]*\bmd-input\b/);
+    expect(page.text).not.toMatch(/class="[^"]*\bmd-select\b/);
+  });
+
+  it('liefert für jeden Stammdatentyp einen Dialog mit Panel', async () => {
+    const page = await admin.agent.get('/fuhrpark').expect(200);
+
+    ['vehicle', 'company', 'employee'].forEach((type) => {
+      expect(page.text).toContain(`id="${type}-dialog"`);
+      expect(page.text).toContain(`id="${type}-dialog-error"`);
+      expect(page.text).toContain(`id="${type}-dialog-title"`);
+    });
+
+    // Je Dialog ein Panel - gezaehlt wird im Abschnitt des jeweiligen
+    // Dialogs, nicht auf der ganzen Seite: foot.ejs bringt einen eigenen
+    // Bestaetigungsdialog mit, der ebenfalls ein Panel hat.
+    ['vehicle', 'company', 'employee'].forEach((type) => {
+      const start = page.text.indexOf(`id="${type}-dialog"`);
+      const block = page.text.slice(start, page.text.indexOf('</dialog>', start));
+      expect(block).toContain('md-dialog__panel');
+    });
+  });
+
+  it('versteckt die Fehlerleiste über die Klasse, nicht über das Attribut', async () => {
+    // .hidden traegt !important; ein hidden-Attribut wuerde von
+    // .md-banner { display:flex } ueberstimmt und die leere rote Leiste
+    // bliebe dauerhaft sichtbar.
+    const page = await admin.agent.get('/fuhrpark').expect(200);
+
+    expect(page.text).toMatch(/md-banner md-banner--error hidden/);
+    expect(page.text).not.toMatch(/md-banner--error"[^>]*\shidden(\s|>)/);
+  });
+});

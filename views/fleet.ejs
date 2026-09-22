@@ -59,7 +59,7 @@
                 <td class="md-body-s"><%= new Date(card.lastSeenAt).toLocaleDateString('de-DE') %></td>
                 <td>
                   <div class="md-row" style="gap:8px;align-items:center">
-                    <select class="md-select" data-assign-vehicle aria-label="Fahrzeug für <%= card.rfid %>">
+                    <select class="md-field__select" data-assign-vehicle style="min-width:220px" aria-label="Fahrzeug für <%= card.rfid %>">
                       <option value="">– wählen –</option>
                       <% vehicles.filter(function (v) { return v.active; }).forEach(function (vehicle) { %>
                         <option value="<%= vehicle.id %>"><%= vehicle.plate %><%= vehicle.employeeName ? ' · ' + vehicle.employeeName : '' %></option>
@@ -187,7 +187,10 @@
                 <% if (company.pricePerKwh === null) { %>
                   <span class="md-body-s md-on-surface-variant">global</span>
                 <% } else { %>
-                  <%= company.pricePerKwh.toFixed(2).replace('.', ',') %> €/kWh
+                  <%# Bis zu drei Nachkommastellen: Arbeitspreise wie 0,328 sind
+                      üblich, und auf 0,33 gerundet steht etwas anderes da, als
+                      abgerechnet wird. %>
+                  <%= company.pricePerKwh.toFixed(3).replace(/0$/, '').replace('.', ',') %> €/kWh
                 <% } %>
               </td>
               <td>
@@ -253,13 +256,169 @@
 
 </main>
 
-<!-- Die Auswahllisten der Dialoge werden aus diesen Daten aufgebaut. -->
-<script type="application/json" id="fleet-data" nonce="<%= cspNonce %>">
-  <%- JSON.stringify({
-    companies: companies.map(function (c) { return { id: c.id, name: c.name, active: c.active }; }),
-    employees: employees.map(function (e) { return { id: e.id, name: e.name, active: e.active }; }),
-  }) %>
-</script>
+
+<!-- ================================================================ Dialoge -->
+<%
+  // Auswahllisten einmal vorbereiten; die Dialoge teilen sie sich.
+  var activeCompanies = companies.filter(function (c) { return c.active; });
+  var activeEmployees = employees.filter(function (e) { return e.active; });
+%>
+
+<dialog id="vehicle-dialog" class="md-dialog">
+  <form class="md-dialog__panel" method="dialog">
+    <h2 class="md-dialog__title" id="vehicle-dialog-title">Fahrzeug anlegen</h2>
+    <div id="vehicle-dialog-error" class="md-banner md-banner--error hidden" style="margin-bottom:20px"></div>
+
+    <div class="md-stack" style="gap:20px">
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="vehicle-plate" placeholder=" " required>
+        <span class="md-field__label">Kennzeichen</span>
+      </label>
+
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="vehicle-label" placeholder=" ">
+        <span class="md-field__label">Bezeichnung (optional)</span>
+      </label>
+
+      <label class="md-field">
+        <select id="vehicle-companyId" class="md-field__select">
+          <option value="">– keine (privat) –</option>
+          <% activeCompanies.forEach(function (company) { %>
+            <option value="<%= company.id %>"><%= company.name %></option>
+          <% }); %>
+        </select>
+        <span class="md-field__label">Firma</span>
+        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
+      </label>
+
+      <label class="md-field">
+        <select id="vehicle-employeeId" class="md-field__select">
+          <option value="">– keiner –</option>
+          <% activeEmployees.forEach(function (employee) { %>
+            <option value="<%= employee.id %>"><%= employee.name %></option>
+          <% }); %>
+        </select>
+        <span class="md-field__label">Mitarbeiter</span>
+        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
+      </label>
+
+      <label class="md-field">
+        <textarea class="md-field__textarea" id="vehicle-notes" placeholder=" "></textarea>
+        <span class="md-field__label">Notiz (optional)</span>
+      </label>
+
+      <label class="md-switch" id="vehicle-active-row">
+        <input type="checkbox" id="vehicle-active" checked>
+        <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+        <span class="md-body-m">Fahrzeug aktiv</span>
+      </label>
+    </div>
+
+    <div class="md-dialog__actions">
+      <button type="button" class="md-btn md-btn--text" data-dialog-cancel>Abbrechen</button>
+      <button type="button" class="md-btn md-btn--filled" data-dialog-submit>Speichern</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="company-dialog" class="md-dialog">
+  <form class="md-dialog__panel" method="dialog">
+    <h2 class="md-dialog__title" id="company-dialog-title">Firma anlegen</h2>
+    <div id="company-dialog-error" class="md-banner md-banner--error hidden" style="margin-bottom:20px"></div>
+
+    <div class="md-stack" style="gap:20px">
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="company-name" placeholder=" " required>
+        <span class="md-field__label">Name</span>
+      </label>
+
+      <label class="md-field">
+        <select id="company-kind" class="md-field__select">
+          <option value="company">Firma</option>
+          <option value="private">Privat</option>
+        </select>
+        <span class="md-field__label">Art</span>
+        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
+      </label>
+
+      <label class="md-field">
+        <textarea class="md-field__textarea" id="company-address" placeholder=" "></textarea>
+        <span class="md-field__label">Rechnungsanschrift</span>
+      </label>
+
+      <label class="md-field">
+        <input class="md-field__input" type="email" id="company-contactEmail" placeholder=" ">
+        <span class="md-field__label">Kontaktadresse für Rechnungen</span>
+        <span class="md-field__hint">Leer: der Bericht geht an den globalen Empfänger.</span>
+      </label>
+
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="company-pricePerKwh" placeholder=" "
+               inputmode="decimal">
+        <span class="md-field__label">Eigener Arbeitspreis (€/kWh)</span>
+        <span class="md-field__hint">Leer lassen für den Preis aus den Einstellungen.</span>
+      </label>
+
+      <label class="md-switch">
+        <input type="checkbox" id="company-ownReport" checked>
+        <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+        <span class="md-body-m">Eigener Monatsbericht per Mail</span>
+      </label>
+
+      <label class="md-switch" id="company-active-row">
+        <input type="checkbox" id="company-active" checked>
+        <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+        <span class="md-body-m">Firma aktiv</span>
+      </label>
+    </div>
+
+    <div class="md-dialog__actions">
+      <button type="button" class="md-btn md-btn--text" data-dialog-cancel>Abbrechen</button>
+      <button type="button" class="md-btn md-btn--filled" data-dialog-submit>Speichern</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="employee-dialog" class="md-dialog">
+  <form class="md-dialog__panel" method="dialog">
+    <h2 class="md-dialog__title" id="employee-dialog-title">Mitarbeiter anlegen</h2>
+    <div id="employee-dialog-error" class="md-banner md-banner--error hidden" style="margin-bottom:20px"></div>
+
+    <div class="md-stack" style="gap:20px">
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="employee-name" placeholder=" " required>
+        <span class="md-field__label">Name</span>
+      </label>
+
+      <label class="md-field">
+        <select id="employee-companyId" class="md-field__select">
+          <option value="">– keine –</option>
+          <% activeCompanies.forEach(function (company) { %>
+            <option value="<%= company.id %>"><%= company.name %></option>
+          <% }); %>
+        </select>
+        <span class="md-field__label">Firma</span>
+        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
+      </label>
+
+      <label class="md-field">
+        <input class="md-field__input" type="text" id="employee-personnelNo" placeholder=" ">
+        <span class="md-field__label">Personalnummer (optional)</span>
+      </label>
+
+      <label class="md-switch" id="employee-active-row">
+        <input type="checkbox" id="employee-active" checked>
+        <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+        <span class="md-body-m">Mitarbeiter aktiv</span>
+      </label>
+    </div>
+
+    <div class="md-dialog__actions">
+      <button type="button" class="md-btn md-btn--text" data-dialog-cancel>Abbrechen</button>
+      <button type="button" class="md-btn md-btn--filled" data-dialog-submit>Speichern</button>
+    </div>
+  </form>
+</dialog>
 
 <script src="/static/js/fleet.js" nonce="<%= cspNonce %>" defer></script>
 
