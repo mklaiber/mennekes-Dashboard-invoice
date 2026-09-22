@@ -11,20 +11,14 @@
     vehicle: {
       endpoint: 'vehicles',
       titles: ['Fahrzeug anlegen', 'Fahrzeug bearbeiten'],
-      fields: ['plate', 'label', 'companyId', 'employeeId', 'notes'],
+      fields: ['plate', 'label', 'companyId', 'employeeName', 'notes'],
       switches: ['active'],
     },
     company: {
       endpoint: 'companies',
       titles: ['Firma anlegen', 'Firma bearbeiten'],
-      fields: ['name', 'kind', 'address', 'contactEmail', 'pricePerKwh'],
+      fields: ['name', 'address', 'contactEmail', 'pricePerKwh'],
       switches: ['ownReport', 'active'],
-    },
-    employee: {
-      endpoint: 'employees',
-      titles: ['Mitarbeiter anlegen', 'Mitarbeiter bearbeiten'],
-      fields: ['name', 'companyId', 'personnelNo'],
-      switches: ['active'],
     },
   };
 

@@ -78,7 +78,6 @@ function matchesScope(session, scope) {
   if (!scope || !scope.kind || scope.kind === 'all') return true;
   if (scope.kind === 'company')  return session.companyId === scope.id;
   if (scope.kind === 'vehicle')  return session.vehicleId === scope.id;
-  if (scope.kind === 'employee') return session.employeeId === scope.id;
   // "unassigned": alles, was zu keinem Fahrzeug gehoert - die Arbeitsliste,
   // damit nichts unbemerkt liegen bleibt.
   if (scope.kind === 'unassigned') return session.vehicleId === null;
@@ -170,7 +169,6 @@ function buildMonthlyReport({
       vehiclePlate: session.vehiclePlate || '',
       companyId: session.companyId ?? null,
       companyName: session.companyName || '',
-      employeeId: session.employeeId ?? null,
       employeeName: session.employeeName || '',
     };
   });
@@ -240,21 +238,26 @@ function buildMonthlyReport({
     label: row.vehiclePlate || 'Nicht zugeordnet',
     extra: {
       plate: row.vehiclePlate, companyId: row.companyId, companyName: row.companyName,
-      employeeId: row.employeeId, employeeName: row.employeeName,
+      employeeName: row.employeeName,
       assigned: row.vehicleId !== null,
     },
   }), pricePerKwh);
 
   const byCompany = aggregateBy(rows, (row) => ({
     key: row.companyId,
-    label: row.companyName || 'Ohne Firma',
+    // Ohne Firmenbezug ist der Ladevorgang privat - er gehoert in keine
+    // Firmenrechnung, taucht aber in der Gesamtuebersicht auf.
+    label: row.companyName || 'Privat',
     extra: { companyId: row.companyId, assigned: row.companyId !== null },
   }), pricePerKwh);
 
+  // Nach Namen gruppiert, nicht nach einer ID: den Mitarbeiter gibt es nicht
+  // als Stammdatensatz, er steht als Text am Fahrzeug und eingefroren am
+  // Ladevorgang.
   const byEmployee = aggregateBy(rows, (row) => ({
-    key: row.employeeId,
+    key: row.employeeName || null,
     label: row.employeeName || 'Ohne Mitarbeiter',
-    extra: { employeeId: row.employeeId, companyName: row.companyName },
+    extra: { companyName: row.companyName },
   }), pricePerKwh);
 
   totals.vehicleCount = byVehicle.length;

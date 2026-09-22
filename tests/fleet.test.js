@@ -17,20 +17,25 @@ beforeEach(() => {
 });
 
 describe('Stammdaten', () => {
-  it('legt "Privat" als Firma an, nicht als Sonderfall im Code', () => {
-    const companies = fleet.listCompanies();
-    const privat = companies.find((c) => c.kind === 'private');
+  it('kennt "privat" als Abwesenheit einer Firma, nicht als eigene Firma', () => {
+    // Zwei Schreibweisen fuer denselben Sachverhalt waeren eine Fehlerquelle:
+    // ein Auto ohne Firma und ein Auto an einer Firma namens "Privat".
+    expect(fleet.listCompanies()).toHaveLength(0);
 
-    expect(privat).toBeTruthy();
+    const privat = fleet.createVehicle({ plate: 'TUT-PR-1' });
     expect(privat.isPrivate).toBe(true);
-    // An sich selbst schickt man keine Rechnung.
-    expect(privat.ownReport).toBe(false);
+    expect(privat.companyId).toBeNull();
+
+    const company = fleet.createCompany({ name: 'Klaiber GmbH' });
+    const dienstwagen = fleet.createVehicle({ plate: 'TUT-MK-1', companyId: company.id });
+    expect(dienstwagen.isPrivate).toBe(false);
   });
 
   it('führt ein Fahrzeug mit Firma, Mitarbeiter und mehreren Karten', () => {
     const company = fleet.createCompany({ name: 'Klaiber GmbH', contactEmail: 'buchhaltung@example.net' });
-    const employee = fleet.createEmployee({ name: 'Moritz', companyId: company.id, personnelNo: '042' });
-    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100', label: 'Kombi', companyId: company.id, employeeId: employee.id });
+    const vehicle = fleet.createVehicle({
+      plate: 'TUT-MK-100', label: 'Kombi', companyId: company.id, employeeName: 'Moritz',
+    });
 
     fleet.assignCardToVehicle('aaaa1111', vehicle.id);
     fleet.assignCardToVehicle('bbbb2222', vehicle.id);
@@ -54,14 +59,14 @@ describe('Stammdaten', () => {
 describe('Zuordnung einfrieren', () => {
   it('löst eine Karte zu Fahrzeug, Firma und Mitarbeiter auf', () => {
     const company = fleet.createCompany({ name: 'Klaiber GmbH' });
-    const employee = fleet.createEmployee({ name: 'Moritz', companyId: company.id });
-    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100', companyId: company.id, employeeId: employee.id });
+    const vehicle = fleet.createVehicle({
+      plate: 'TUT-MK-100', companyId: company.id, employeeName: 'Moritz',
+    });
     fleet.assignCardToVehicle('aaaa1111', vehicle.id);
 
     expect(fleet.resolveAttribution('aaaa1111')).toMatchObject({
       vehicleId: vehicle.id,
       companyId: company.id,
-      employeeId: employee.id,
       vehiclePlate: 'TUT-MK-100',
       companyName: 'Klaiber GmbH',
       employeeName: 'Moritz',
@@ -91,8 +96,9 @@ describe('Nicht zugeordnete Karten', () => {
     insertSession('s2', 'zzzz9999', 7, '2026-08-02T10:00:00Z');
 
     const company = fleet.createCompany({ name: 'Klaiber GmbH' });
-    const employee = fleet.createEmployee({ name: 'Moritz', companyId: company.id });
-    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100', companyId: company.id, employeeId: employee.id });
+    const vehicle = fleet.createVehicle({
+      plate: 'TUT-MK-100', companyId: company.id, employeeName: 'Moritz',
+    });
 
     const result = fleet.assignCardToVehicle('zzzz9999', vehicle.id, { backfill: true });
 
@@ -170,8 +176,9 @@ describe('Eingang neuer Ladevorgänge', () => {
 
   it('friert Fahrzeug, Firma und Mitarbeiter auf dem Datensatz ein', () => {
     const company = fleet.createCompany({ name: 'Klaiber GmbH' });
-    const employee = fleet.createEmployee({ name: 'Moritz', companyId: company.id });
-    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100', companyId: company.id, employeeId: employee.id });
+    const vehicle = fleet.createVehicle({
+      plate: 'TUT-MK-100', companyId: company.id, employeeName: 'Moritz',
+    });
     fleet.assignCardToVehicle('aaaa1111', vehicle.id);
 
     chargingSessions.upsertMany([incoming('neu-1', 'aaaa1111', 20)]);
@@ -221,16 +228,16 @@ describe('Abrechnung nach Fahrzeug, Firma und Mitarbeiter', () => {
     end: new Date('2026-08-05T11:00:00Z'),
     durationSeconds: 3600,
     rfid: 'x', rfidRaw: 'X',
-    vehicleId: null, companyId: null, employeeId: null,
+    vehicleId: null, companyId: null,
     vehiclePlate: '', companyName: '', employeeName: '',
     ...attrs,
   });
 
   const sessions = [
-    session('a', { energyKwh: 10, vehicleId: 1, companyId: 1, employeeId: 1, vehiclePlate: 'TUT-MK-100', companyName: 'Klaiber GmbH', employeeName: 'Moritz' }),
-    session('b', { energyKwh: 20, vehicleId: 1, companyId: 1, employeeId: 1, vehiclePlate: 'TUT-MK-100', companyName: 'Klaiber GmbH', employeeName: 'Moritz' }),
-    session('c', { energyKwh: 30, vehicleId: 2, companyId: 1, employeeId: 2, vehiclePlate: 'TUT-SK-200', companyName: 'Klaiber GmbH', employeeName: 'Sabine' }),
-    session('d', { energyKwh: 40, vehicleId: 3, companyId: 2, employeeId: 3, vehiclePlate: 'TUT-PR-300', companyName: 'Andere AG', employeeName: 'Chris' }),
+    session('a', { energyKwh: 10, vehicleId: 1, companyId: 1, vehiclePlate: 'TUT-MK-100', companyName: 'Klaiber GmbH', employeeName: 'Moritz' }),
+    session('b', { energyKwh: 20, vehicleId: 1, companyId: 1, vehiclePlate: 'TUT-MK-100', companyName: 'Klaiber GmbH', employeeName: 'Moritz' }),
+    session('c', { energyKwh: 30, vehicleId: 2, companyId: 1, vehiclePlate: 'TUT-SK-200', companyName: 'Klaiber GmbH', employeeName: 'Sabine' }),
+    session('d', { energyKwh: 40, vehicleId: 3, companyId: 2, vehiclePlate: 'TUT-PR-300', companyName: 'Andere AG', employeeName: 'Chris' }),
     session('e', { energyKwh: 5 }), // keiner Karte zugeordnet
   ];
 
@@ -266,9 +273,8 @@ describe('Abrechnung nach Fahrzeug, Firma und Mitarbeiter', () => {
     expect(report.scope).toEqual({ kind: 'company', id: 2 });
   });
 
-  it('grenzt auf ein Fahrzeug und auf einen Mitarbeiter ein', () => {
+  it('grenzt auf ein Fahrzeug ein', () => {
     expect(build({ kind: 'vehicle', id: 1 }).totals.energyKwh).toBe(30);
-    expect(build({ kind: 'employee', id: 2 }).totals.energyKwh).toBe(30);
   });
 
   it('listet nicht zugeordnete Ladevorgänge als eigene Arbeitsliste', () => {

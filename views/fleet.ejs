@@ -7,7 +7,7 @@
     <div>
       <h1 class="md-headline-m" style="margin:0">Fuhrpark</h1>
       <p class="md-body-m md-on-surface-variant" style="margin:4px 0 0">
-        Firmen, Mitarbeiter, Fahrzeuge und ihre Ladekarten.
+        Firmen, Fahrzeuge und ihre Ladekarten. Ein Auto gehört privat oder zu genau einer Firma.
       </p>
     </div>
   </div>
@@ -108,18 +108,16 @@
             <tr><td colspan="6" class="md-body-s md-on-surface-variant">Noch keine Fahrzeuge angelegt.</td></tr>
           <% } %>
           <% vehicles.forEach(function (vehicle) { %>
-            <tr data-vehicle='<%- JSON.stringify({ id: vehicle.id, plate: vehicle.plate, label: vehicle.label, companyId: vehicle.companyId, employeeId: vehicle.employeeId, notes: vehicle.notes, active: vehicle.active }) %>'>
+            <tr data-vehicle='<%- JSON.stringify({ id: vehicle.id, plate: vehicle.plate, label: vehicle.label, companyId: vehicle.companyId, employeeName: vehicle.employeeName, notes: vehicle.notes, active: vehicle.active }) %>'>
               <td>
                 <div class="md-label-l"><%= vehicle.plate %></div>
                 <% if (vehicle.label) { %><div class="md-body-s md-on-surface-variant"><%= vehicle.label %></div><% } %>
               </td>
               <td>
                 <% if (vehicle.isPrivate) { %>
-                  <span class="md-chip">Privat</span>
-                <% } else if (vehicle.companyName) { %>
-                  <%= vehicle.companyName %>
+                  <span class="md-chip">privat</span>
                 <% } else { %>
-                  <span class="md-body-s md-on-surface-variant">–</span>
+                  <%= vehicle.companyName %>
                 <% } %>
               </td>
               <td><%= vehicle.employeeName || '–' %></td>
@@ -164,7 +162,7 @@
 
     <div class="md-table-wrap">
       <table class="md-table">
-        <caption class="sr-only">Firmen und Privatnutzung</caption>
+        <caption class="sr-only">Firmen</caption>
         <thead>
           <tr>
             <th scope="col">Name</th>
@@ -179,8 +177,14 @@
             <tr data-company='<%- JSON.stringify({ id: company.id, name: company.name, kind: company.kind, address: company.address, contactEmail: company.contactEmail, pricePerKwh: company.pricePerKwh, ownReport: company.ownReport, active: company.active }) %>'>
               <td>
                 <div class="md-label-l"><%= company.name %></div>
-                <% if (company.isPrivate) { %><span class="md-chip">privat</span><% } %>
                 <% if (!company.active) { %><span class="md-chip">stillgelegt</span><% } %>
+                <%# Eine Firma ohne Auto ist hier ein Versehen: abgerechnet
+                    wird je Fahrzeug, es gaebe also nichts zu berichten.
+                    Erzwingen laesst es sich nicht - die Firma entsteht
+                    zwangslaeufig vor ihrem ersten Auto. %>
+                <% if (!vehicles.some(function (v) { return v.companyId === company.id; })) { %>
+                  <span class="md-chip" title="Ohne Fahrzeug gibt es für diese Firma nichts abzurechnen">keine Fahrzeuge</span>
+                <% } %>
               </td>
               <td class="md-body-s"><%= company.contactEmail || '–' %></td>
               <td>
@@ -208,52 +212,6 @@
     </div>
   </section>
 
-  <!-- ======================================================== Mitarbeiter -->
-  <section class="md-card">
-    <div class="md-row" style="margin-bottom:16px">
-      <h2 class="md-title-m" style="margin:0">Mitarbeiter</h2>
-      <span class="md-spacer"></span>
-      <button type="button" class="md-btn md-btn--filled" data-new="employee">
-        <%- include('partials/icon', { name: 'add', size: 18 }) %> Mitarbeiter anlegen
-      </button>
-    </div>
-
-    <div class="md-table-wrap">
-      <table class="md-table">
-        <caption class="sr-only">Mitarbeiter</caption>
-        <thead>
-          <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Firma</th>
-            <th scope="col">Personalnummer</th>
-            <th scope="col">Status</th>
-            <th scope="col"><span class="sr-only">Aktionen</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          <% if (employees.length === 0) { %>
-            <tr><td colspan="5" class="md-body-s md-on-surface-variant">Noch keine Mitarbeiter angelegt.</td></tr>
-          <% } %>
-          <% employees.forEach(function (employee) { %>
-            <tr data-employee='<%- JSON.stringify({ id: employee.id, name: employee.name, companyId: employee.companyId, personnelNo: employee.personnelNo, active: employee.active }) %>'>
-              <td class="md-label-l"><%= employee.name %></td>
-              <td><%= employee.companyName || '–' %></td>
-              <td class="md-mono md-body-s"><%= employee.personnelNo || '–' %></td>
-              <td>
-                <span class="md-chip <%= employee.active ? 'md-chip--primary' : '' %>">
-                  <%= employee.active ? 'aktiv' : 'stillgelegt' %>
-                </span>
-              </td>
-              <td>
-                <button type="button" class="md-btn md-btn--text" data-edit="employee">Bearbeiten</button>
-              </td>
-            </tr>
-          <% }); %>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
 </main>
 
 
@@ -261,7 +219,6 @@
 <%
   // Auswahllisten einmal vorbereiten; die Dialoge teilen sie sich.
   var activeCompanies = companies.filter(function (c) { return c.active; });
-  var activeEmployees = employees.filter(function (e) { return e.active; });
 %>
 
 <dialog id="vehicle-dialog" class="md-dialog">
@@ -282,7 +239,7 @@
 
       <label class="md-field">
         <select id="vehicle-companyId" class="md-field__select">
-          <option value="">– keine (privat) –</option>
+          <option value="">– privat –</option>
           <% activeCompanies.forEach(function (company) { %>
             <option value="<%= company.id %>"><%= company.name %></option>
           <% }); %>
@@ -292,14 +249,9 @@
       </label>
 
       <label class="md-field">
-        <select id="vehicle-employeeId" class="md-field__select">
-          <option value="">– keiner –</option>
-          <% activeEmployees.forEach(function (employee) { %>
-            <option value="<%= employee.id %>"><%= employee.name %></option>
-          <% }); %>
-        </select>
-        <span class="md-field__label">Mitarbeiter</span>
-        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
+        <input class="md-field__input" type="text" id="vehicle-employeeName" placeholder=" ">
+        <span class="md-field__label">Mitarbeiter (optional)</span>
+        <span class="md-field__hint">Wer das Auto fährt – erscheint so auf der Abrechnung.</span>
       </label>
 
       <label class="md-field">
@@ -330,15 +282,6 @@
       <label class="md-field">
         <input class="md-field__input" type="text" id="company-name" placeholder=" " required>
         <span class="md-field__label">Name</span>
-      </label>
-
-      <label class="md-field">
-        <select id="company-kind" class="md-field__select">
-          <option value="company">Firma</option>
-          <option value="private">Privat</option>
-        </select>
-        <span class="md-field__label">Art</span>
-        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
       </label>
 
       <label class="md-field">
@@ -379,46 +322,6 @@
   </form>
 </dialog>
 
-<dialog id="employee-dialog" class="md-dialog">
-  <form class="md-dialog__panel" method="dialog">
-    <h2 class="md-dialog__title" id="employee-dialog-title">Mitarbeiter anlegen</h2>
-    <div id="employee-dialog-error" class="md-banner md-banner--error hidden" style="margin-bottom:20px"></div>
-
-    <div class="md-stack" style="gap:20px">
-      <label class="md-field">
-        <input class="md-field__input" type="text" id="employee-name" placeholder=" " required>
-        <span class="md-field__label">Name</span>
-      </label>
-
-      <label class="md-field">
-        <select id="employee-companyId" class="md-field__select">
-          <option value="">– keine –</option>
-          <% activeCompanies.forEach(function (company) { %>
-            <option value="<%= company.id %>"><%= company.name %></option>
-          <% }); %>
-        </select>
-        <span class="md-field__label">Firma</span>
-        <span class="md-field__arrow"><%- include('partials/icon', { name: 'expand', size: 18 }) %></span>
-      </label>
-
-      <label class="md-field">
-        <input class="md-field__input" type="text" id="employee-personnelNo" placeholder=" ">
-        <span class="md-field__label">Personalnummer (optional)</span>
-      </label>
-
-      <label class="md-switch" id="employee-active-row">
-        <input type="checkbox" id="employee-active" checked>
-        <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
-        <span class="md-body-m">Mitarbeiter aktiv</span>
-      </label>
-    </div>
-
-    <div class="md-dialog__actions">
-      <button type="button" class="md-btn md-btn--text" data-dialog-cancel>Abbrechen</button>
-      <button type="button" class="md-btn md-btn--filled" data-dialog-submit>Speichern</button>
-    </div>
-  </form>
-</dialog>
 
 <script src="/static/js/fleet.js" nonce="<%= cspNonce %>" defer></script>
 

@@ -119,7 +119,7 @@ function createApiRouter({ liveFeed, mennekesClient }) {
    * POST /api/report/run - Abrechnung erzeugen.
    * Body: { year?, month?, sendMail?: boolean, to?: string[] }
    */
-  const SCOPE_KINDS = new Set(['all', 'company', 'vehicle', 'employee', 'unassigned']);
+  const SCOPE_KINDS = new Set(['all', 'company', 'vehicle', 'unassigned']);
 
   /**
    * Liest den Geltungsbereich eines Berichts aus dem Request.
@@ -134,7 +134,7 @@ function createApiRouter({ liveFeed, mennekesClient }) {
         status: 400, code: 'bad_request',
       });
     }
-    const needsId = raw.kind === 'company' || raw.kind === 'vehicle' || raw.kind === 'employee';
+    const needsId = raw.kind === 'company' || raw.kind === 'vehicle';
     const id = raw.id === undefined || raw.id === null ? null : Number.parseInt(raw.id, 10);
     if (needsId && (!Number.isInteger(id) || id < 1)) {
       throw Object.assign(new Error('Für diesen Geltungsbereich fehlt eine gültige ID.'), {

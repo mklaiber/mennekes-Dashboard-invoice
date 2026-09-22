@@ -45,7 +45,6 @@ function describeScope(scope, company = null) {
   if (!scope || scope.kind === 'all') return 'Gesamt';
   if (scope.kind === 'company')  return company ? company.name : `Firma ${scope.id}`;
   if (scope.kind === 'vehicle')  return `Fahrzeug ${scope.id}`;
-  if (scope.kind === 'employee') return `Mitarbeiter ${scope.id}`;
   if (scope.kind === 'unassigned') return 'Nicht zugeordnet';
   return 'Gesamt';
 }

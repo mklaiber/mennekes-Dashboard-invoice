@@ -41,7 +41,7 @@ describe('Zugriff', () => {
 });
 
 describe('Stammdaten über die API', () => {
-  it('legt Firma, Mitarbeiter und Fahrzeug an und verknüpft sie', async () => {
+  it('legt Firma und Fahrzeug an und verknüpft sie', async () => {
     const company = await admin.agent
       .post('/api/fleet/companies')
       .set('X-CSRF-Token', admin.csrfToken)
@@ -52,19 +52,13 @@ describe('Stammdaten über die API', () => {
     // aus dem Formular an einem Punkt, den niemand tippt.
     expect(company.body.company.pricePerKwh).toBe(0.42);
 
-    const employee = await admin.agent
-      .post('/api/fleet/employees')
-      .set('X-CSRF-Token', admin.csrfToken)
-      .send({ name: 'Moritz', companyId: company.body.company.id, personnelNo: '042' })
-      .expect(201);
-
     const vehicle = await admin.agent
       .post('/api/fleet/vehicles')
       .set('X-CSRF-Token', admin.csrfToken)
       .send({
         plate: 'TUT-MK-100',
         companyId: company.body.company.id,
-        employeeId: employee.body.employee.id,
+        employeeName: 'Moritz',
       })
       .expect(201);
 
@@ -173,19 +167,23 @@ describe('Dialoge im Markup', () => {
     expect(page.text).not.toMatch(/class="[^"]*\bmd-select\b/);
   });
 
-  it('liefert für jeden Stammdatentyp einen Dialog mit Panel', async () => {
+  it('liefert für Fahrzeug und Firma je einen Dialog mit Panel', async () => {
     const page = await admin.agent.get('/fuhrpark').expect(200);
 
-    ['vehicle', 'company', 'employee'].forEach((type) => {
+    ['vehicle', 'company'].forEach((type) => {
       expect(page.text).toContain(`id="${type}-dialog"`);
       expect(page.text).toContain(`id="${type}-dialog-error"`);
       expect(page.text).toContain(`id="${type}-dialog-title"`);
     });
 
+    // Der Mitarbeiterstamm ist absichtlich entfallen: fuer einen Haushalt
+    // mit ein paar Dienstwagen ist er Ballast, der Name steht am Auto.
+    expect(page.text).not.toContain('id="employee-dialog"');
+
     // Je Dialog ein Panel - gezaehlt wird im Abschnitt des jeweiligen
     // Dialogs, nicht auf der ganzen Seite: foot.ejs bringt einen eigenen
     // Bestaetigungsdialog mit, der ebenfalls ein Panel hat.
-    ['vehicle', 'company', 'employee'].forEach((type) => {
+    ['vehicle', 'company'].forEach((type) => {
       const start = page.text.indexOf(`id="${type}-dialog"`);
       const block = page.text.slice(start, page.text.indexOf('</dialog>', start));
       expect(block).toContain('md-dialog__panel');
@@ -200,5 +198,85 @@ describe('Dialoge im Markup', () => {
 
     expect(page.text).toMatch(/md-banner md-banner--error hidden/);
     expect(page.text).not.toMatch(/md-banner--error"[^>]*\shidden(\s|>)/);
+  });
+});
+
+describe('Beziehung Firma – Fahrzeug', () => {
+  it('kennzeichnet eine Firma ohne Fahrzeug', async () => {
+    await admin.agent
+      .post('/api/fleet/companies')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ name: 'Ohne Auto GmbH' })
+      .expect(201);
+
+    const page = await admin.agent.get('/fuhrpark').expect(200);
+    expect(page.text).toContain('keine Fahrzeuge');
+  });
+
+  it('lässt den Hinweis weg, sobald die Firma ein Fahrzeug hat', async () => {
+    const company = await admin.agent
+      .post('/api/fleet/companies')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ name: 'Mit Auto GmbH' })
+      .expect(201);
+
+    await admin.agent
+      .post('/api/fleet/vehicles')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ plate: 'TUT-AA-1', companyId: company.body.company.id, employeeName: 'Moritz' })
+      .expect(201);
+
+    const page = await admin.agent.get('/fuhrpark').expect(200);
+    const row = page.text.slice(page.text.indexOf('Mit Auto GmbH'));
+    expect(row.slice(0, row.indexOf('</tr>'))).not.toContain('keine Fahrzeuge');
+  });
+
+  it('ordnet ein Fahrzeug genau einer Firma zu oder keiner', async () => {
+    const response = await admin.agent
+      .post('/api/fleet/vehicles')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ plate: 'TUT-PRIV-1' })
+      .expect(201);
+
+    // Ohne Firma ist das Auto privat - das Modell kennt keinen dritten Fall.
+    expect(response.body.vehicle.companyId).toBeNull();
+    expect(response.body.vehicle.companyName).toBe('');
+    expect(response.body.vehicle.isPrivate).toBe(true);
+  });
+});
+
+describe('Ungültige Verweise', () => {
+  it('weist eine nicht existierende Firma mit 400 ab, statt mit 500 zu scheitern', async () => {
+    const response = await admin.agent
+      .post('/api/fleet/vehicles')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ plate: 'TUT-XX-1', companyId: 9999 })
+      .expect(400);
+
+    expect(response.body.message).toMatch(/keine Firma mit der ID 9999/);
+  });
+
+  it('nimmt eine leere Firma als "privat" an, nicht als Fehler', async () => {
+    const response = await admin.agent
+      .post('/api/fleet/vehicles')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ plate: 'TUT-XX-2', companyId: '' })
+      .expect(201);
+
+    expect(response.body.vehicle.isPrivate).toBe(true);
+  });
+
+  it('weist auch beim Bearbeiten eine erfundene Firma ab', async () => {
+    const created = await admin.agent
+      .post('/api/fleet/vehicles')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ plate: 'TUT-XX-3' })
+      .expect(201);
+
+    await admin.agent
+      .put(`/api/fleet/vehicles/${created.body.vehicle.id}`)
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ companyId: 4242 })
+      .expect(400);
   });
 });

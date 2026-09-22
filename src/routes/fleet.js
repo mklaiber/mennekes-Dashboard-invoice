@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Fuhrpark-Verwaltung: Firmen, Mitarbeiter, Fahrzeuge und Kartenzuordnung.
+ * Firmen, Fahrzeuge und Kartenzuordnung eines Privathaushalts.
  *
  * HTML-Ansicht unter /fuhrpark, die Aktionen laufen ueber /api/fleet/*.
  */
@@ -39,6 +39,28 @@ function createFleetRouter() {
     return price;
   }
 
+  /**
+   * Loest eine Firmen-ID auf und weist sie ab, wenn es sie nicht gibt.
+   *
+   * Ohne das schlaegt erst die Fremdschluesselbedingung in SQLite zu, und der
+   * Aufrufer bekommt einen 500 statt einer verstaendlichen Meldung - etwa
+   * wenn die Firma inzwischen in einem anderen Tab geloescht wurde und die
+   * Auswahlliste noch die alte ID traegt.
+   *
+   * @param {*} value
+   * @returns {number|null} null heisst ausdruecklich "privat"
+   */
+  function resolveCompanyId(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const id = parseId(value, 'Firmen');
+    if (!fleet.findCompany(id)) {
+      throw Object.assign(new Error(`Es gibt keine Firma mit der ID ${id}.`), {
+        status: 400, code: 'bad_request',
+      });
+    }
+    return id;
+  }
+
   // --------------------------------------------------------------- Ansicht
 
   router.get('/fuhrpark', adminOnly, (req, res) => {
@@ -46,7 +68,6 @@ function createFleetRouter() {
       title: 'Fuhrpark',
       active: 'fleet',
       companies: fleet.listCompanies({ includeInactive: true }),
-      employees: fleet.listEmployees({ includeInactive: true }),
       vehicles: fleet.listVehicles({ includeInactive: true }),
       unassignedCards: fleet.listUnassignedCards(),
       knownCards: settingsStore.listRfidMappings(),
@@ -58,7 +79,6 @@ function createFleetRouter() {
   router.get('/api/fleet', adminOnly, (req, res) => {
     res.json({
       companies: fleet.listCompanies({ includeInactive: true }),
-      employees: fleet.listEmployees({ includeInactive: true }),
       vehicles: fleet.listVehicles({ includeInactive: true }),
       unassignedCards: fleet.listUnassignedCards(),
     });
@@ -72,7 +92,6 @@ function createFleetRouter() {
 
     const company = fleet.createCompany({
       name,
-      kind: req.body.kind === 'private' ? 'private' : 'company',
       address: req.body.address,
       contactEmail: req.body.contactEmail,
       pricePerKwh: parsePrice(req.body.pricePerKwh),
@@ -97,35 +116,6 @@ function createFleetRouter() {
     res.json({ company });
   }));
 
-  // ---------------------------------------------------------- Mitarbeiter
-
-  router.post('/api/fleet/employees', adminOnly, asyncHandler(async (req, res) => {
-    const name = String(req.body?.name || '').trim();
-    if (!name) throw badRequest('Der Name des Mitarbeiters fehlt.');
-
-    const employee = fleet.createEmployee({
-      name,
-      companyId: req.body.companyId ? parseId(req.body.companyId, 'Firmen') : null,
-      personnelNo: req.body.personnelNo,
-    });
-
-    audit.log({ action: audit.ACTIONS.FLEET_EMPLOYEE_CREATED, user: req.user, detail: name, ip: req.ip });
-    res.status(201).json({ employee });
-  }));
-
-  router.put('/api/fleet/employees/:id', adminOnly, asyncHandler(async (req, res) => {
-    const id = parseId(req.params.id, 'Mitarbeiter');
-    const patch = { ...req.body };
-    if ('companyId' in patch) patch.companyId = patch.companyId ? Number(patch.companyId) : null;
-    if ('active' in patch) patch.active = patch.active === true || patch.active === 'true';
-
-    const employee = fleet.updateEmployee(id, patch);
-    if (!employee) throw Object.assign(new Error('Mitarbeiter nicht gefunden.'), { status: 404, code: 'not_found' });
-
-    audit.log({ action: audit.ACTIONS.FLEET_EMPLOYEE_UPDATED, user: req.user, detail: employee.name, ip: req.ip });
-    res.json({ employee });
-  }));
-
   // ------------------------------------------------------------- Fahrzeuge
 
   router.post('/api/fleet/vehicles', adminOnly, asyncHandler(async (req, res) => {
@@ -135,8 +125,8 @@ function createFleetRouter() {
     const vehicle = fleet.createVehicle({
       plate,
       label: req.body.label,
-      companyId: req.body.companyId ? parseId(req.body.companyId, 'Firmen') : null,
-      employeeId: req.body.employeeId ? parseId(req.body.employeeId, 'Mitarbeiter') : null,
+      companyId: resolveCompanyId(req.body.companyId),
+      employeeName: req.body.employeeName,
       notes: req.body.notes,
     });
 
@@ -147,8 +137,7 @@ function createFleetRouter() {
   router.put('/api/fleet/vehicles/:id', adminOnly, asyncHandler(async (req, res) => {
     const id = parseId(req.params.id, 'Fahrzeug');
     const patch = { ...req.body };
-    if ('companyId' in patch) patch.companyId = patch.companyId ? Number(patch.companyId) : null;
-    if ('employeeId' in patch) patch.employeeId = patch.employeeId ? Number(patch.employeeId) : null;
+    if ('companyId' in patch) patch.companyId = resolveCompanyId(patch.companyId);
     if ('active' in patch) patch.active = patch.active === true || patch.active === 'true';
 
     const vehicle = fleet.updateVehicle(id, patch);

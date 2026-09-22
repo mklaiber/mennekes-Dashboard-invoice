@@ -299,7 +299,69 @@ const MIGRATIONS = [
       WHERE vehicle_id IS NOT NULL;
     `,
   },
+  {
+    version: 4,
+    name: 'fleet-simplify',
+    up: `
+      -- =====================================================================
+      --  Vereinfachung: kein eigener Mitarbeiterstamm mehr.
+      --
+      --  Gedacht ist das hier fuer EINEN Privathaushalt, in dem ein paar
+      --  Dienstwagen stehen - nicht fuer einen Fuhrpark. Die Beziehung ist:
+      --  eine Firma hat mindestens ein Auto, ein Auto gehoert privat oder zu
+      --  genau einer Firma, ein Auto hat seine Karten.
+      --
+      --  Wer das Auto faehrt, ist damit kein eigenes Wesen mit Stammdaten,
+      --  Personalnummer und Firmenzuordnung, sondern schlicht ein Name am
+      --  Auto. Die Tabelle employees brachte drei Bildschirmmasken und eine
+      --  zusaetzliche Verknuepfung fuer eine Information, die in ein Textfeld
+      --  passt.
+      -- =====================================================================
+
+      ALTER TABLE vehicles ADD COLUMN employee_name TEXT NOT NULL DEFAULT '';
+
+      UPDATE vehicles
+      SET employee_name = COALESCE(
+        (SELECT e.name FROM employees e WHERE e.id = vehicles.employee_id), ''
+      );
+
+      -- Reihenfolge ist wichtig: erst die verweisenden Spalten entfernen,
+      -- dann die Tabelle. Andersherum blieben REFERENCES auf eine nicht mehr
+      -- vorhandene Tabelle stehen und jeder spaetere Schreibzugriff scheiterte.
+      ALTER TABLE vehicles DROP COLUMN employee_id;
+
+      -- Auf charging_sessions bleibt employee_name als eingefrorener Klartext
+      -- erhalten - er traegt die Abrechnung. Nur die ID entfaellt, und dafuer
+      -- muss ihr Index weichen: SQLite verweigert DROP COLUMN, solange ein
+      -- Index auf der Spalte liegt.
+      DROP INDEX IF EXISTS idx_charging_employee;
+      ALTER TABLE charging_sessions DROP COLUMN employee_id;
+
+      DROP TABLE employees;
+
+      -- ------------------------------------------------------------------
+      --  "Privat" war als Firma modelliert, um eine Fallunterscheidung zu
+      --  vermeiden. Bei genauerem Hinsehen erzeugt das aber ZWEI Schreibweisen
+      --  fuer denselben Sachverhalt: ein Auto ohne Firma und ein Auto an der
+      --  Firma "Privat". In der Oberflaeche stand deshalb eine leere Firma
+      --  "Privat" neben Autos, die als "keine Firma" angezeigt wurden.
+      --
+      --  Jetzt gilt schlicht: kein company_id = privat. Damit entfaellt auch
+      --  die Unterscheidung nach der Spalte kind.
+      -- ------------------------------------------------------------------
+      UPDATE vehicles SET company_id = NULL
+       WHERE company_id IN (SELECT id FROM companies WHERE kind = 'private');
+
+      DELETE FROM companies WHERE kind = 'private';
+
+      ALTER TABLE companies DROP COLUMN kind;
+
+      -- charging_sessions bleibt bewusst unberuehrt: dort steht die beim
+      -- Eintreffen eingefrorene Zuordnung, und die schreibt man nicht um.
+    `,
+  },
 ];
+
 
 
 module.exports = { MIGRATIONS };

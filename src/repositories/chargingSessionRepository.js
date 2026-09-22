@@ -30,7 +30,6 @@ function toSession(row) {
     // Stammdatensatz eine alte Rechnung nicht unleserlich macht.
     vehicleId: row.vehicleId ?? null,
     companyId: row.companyId ?? null,
-    employeeId: row.employeeId ?? null,
     vehiclePlate: row.vehiclePlate || '',
     companyName: row.companyName || '',
     employeeName: row.employeeName || '',
@@ -42,7 +41,7 @@ const SELECT_COLUMNS = `
   energy_kwh AS energyKwh, rfid, rfid_raw AS rfidRaw,
   meter_start_kwh AS meterStartKwh, meter_end_kwh AS meterEndKwh,
   source, received_at AS receivedAt,
-  vehicle_id AS vehicleId, company_id AS companyId, employee_id AS employeeId,
+  vehicle_id AS vehicleId, company_id AS companyId,
   vehicle_plate AS vehiclePlate, company_name AS companyName, employee_name AS employeeName
 `;
 
@@ -91,11 +90,11 @@ function upsertMany(sessions, options = {}) {
       INSERT INTO charging_sessions
         (id, start_at, end_at, duration_seconds, energy_kwh, rfid, rfid_raw,
          meter_start_kwh, meter_end_kwh, source, received_at, payload,
-         vehicle_id, company_id, employee_id, vehicle_plate, company_name, employee_name)
+         vehicle_id, company_id, vehicle_plate, company_name, employee_name)
       VALUES
         (@id, @startAt, @endAt, @durationSeconds, @energyKwh, @rfid, @rfidRaw,
          @meterStartKwh, @meterEndKwh, @source, @receivedAt, @payload,
-         @vehicleId, @companyId, @employeeId, @vehiclePlate, @companyName, @employeeName)
+         @vehicleId, @companyId, @vehiclePlate, @companyName, @employeeName)
       ON CONFLICT(id) DO UPDATE SET
         start_at         = excluded.start_at,
         end_at           = excluded.end_at,
@@ -109,7 +108,6 @@ function upsertMany(sessions, options = {}) {
         payload          = excluded.payload,
         vehicle_id    = COALESCE(charging_sessions.vehicle_id,  excluded.vehicle_id),
         company_id    = COALESCE(charging_sessions.company_id,  excluded.company_id),
-        employee_id   = COALESCE(charging_sessions.employee_id, excluded.employee_id),
         vehicle_plate = CASE WHEN charging_sessions.vehicle_id IS NULL
                              THEN excluded.vehicle_plate ELSE charging_sessions.vehicle_plate END,
         company_name  = CASE WHEN charging_sessions.vehicle_id IS NULL
