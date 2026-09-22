@@ -19,6 +19,7 @@ const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
+const { assetVersion } = require('./utils/assets');
 const settingsStore = require('./repositories/settingsRepository');
 const {
   attachUser, requireAuth, requireRole, requirePasswordChange, csrfProtection,
@@ -60,8 +61,16 @@ function createApp(deps = {}) {
 
   // Pro Request ein CSP-Nonce für die wenigen nötigen Inline-Skripte
   // (Bootstrap-Daten aus dem Server-Rendering).
+  // Einmal berechnet, nicht je Anfrage: der Inhalt der Dateien aendert sich
+  // waehrend der Laufzeit nicht.
+  const assets = assetVersion();
+
   app.use((req, res, next) => {
     res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+    // Haengt an jeder statischen Einbindung (siehe utils/assets.js). Hier und
+    // nicht spaeter, damit auch die Fehlerseite sie hat - sonst wuerfe die
+    // Vorlage selbst, wenn ein Fehler vor der uebrigen Kette auftritt.
+    res.locals.assetVersion = assets;
     next();
   });
 

@@ -276,6 +276,6 @@
         timezone: settings.billing.timezone,
       }) %>
 </script>
-<script src="/static/js/dashboard.js" nonce="<%= cspNonce %>" defer></script>
+<script src="/static/js/dashboard.js?v=<%= assetVersion %>" nonce="<%= cspNonce %>" defer></script>
 
 <%- include('partials/foot') %>
