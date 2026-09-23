@@ -7,6 +7,7 @@
  * kostet ~300-800ms; bei manuell ausgelösten Reports aus der WebUI summiert sich das.
  */
 
+const { reportFileName } = require('../utils/reportFiles');
 const fs = require('fs/promises');
 const fsSync = require('fs');
 const path = require('path');
@@ -262,7 +263,7 @@ function escapeHtml(value) {
  * @returns {string}
  */
 function pdfFileName(report) {
-  return `ladestrom_${report.period.key}_abrechnung.pdf`;
+  return reportFileName(report, 'abrechnung', 'pdf');
 }
 
 /** Chromium sauber beenden (Shutdown-Hook, Tests). */

@@ -9,6 +9,7 @@
  *  - UTF-8 BOM, damit Excel Umlaute korrekt anzeigt.
  */
 
+const { reportFileName } = require('../utils/reportFiles');
 const { Parser } = require('@json2csv/plainjs');
 const { round } = require('./billing');
 
@@ -158,7 +159,7 @@ function buildSummaryCsv(report, options = {}) {
  * @returns {string}
  */
 function csvFileName(report, kind = 'detail') {
-  return `ladestrom_${report.period.key}_${kind}.csv`;
+  return reportFileName(report, kind, 'csv');
 }
 
 module.exports = { buildDetailCsv, buildSummaryCsv, csvFileName, decimal, hhmm, DETAIL_FIELDS, SUMMARY_FIELDS, UTF8_BOM };
