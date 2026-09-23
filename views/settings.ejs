@@ -295,7 +295,69 @@
     </div>
   </section>
 
+
+  <!-- ===================== Gefahrenbereich ===================== -->
+  <section class="md-card" style="margin-top:24px;border:1px solid var(--md-error)">
+    <div class="md-card__header">
+      <div>
+        <h2 class="md-card__title" style="color:var(--md-error)">
+          <%- include('partials/icon', { name: 'warning', size: 18 }) %> Gefahrenbereich
+        </h2>
+        <p class="md-card__support">
+          Löscht die Ladevorgänge des laufenden Monats samt der dafür erzeugten Abrechnungen –
+          etwa nach Testladungen. Karten, Fahrzeuge, Firmen, Benutzer, Einstellungen und das
+          Protokoll bleiben erhalten. <strong>Das lässt sich nicht rückgängig machen.</strong>
+        </p>
+      </div>
+    </div>
+    <button type="button" class="md-btn md-btn--danger" id="purge-open" style="margin-top:16px">
+      <%- include('partials/icon', { name: 'warning', size: 18 }) %> Daten für aktuellen Monat löschen
+    </button>
+  </section>
 </main>
+
+
+<dialog id="purge-dialog" class="md-dialog">
+  <div class="md-dialog__panel">
+    <h2 class="md-dialog__title" id="purge-title">Daten löschen?</h2>
+
+    <div id="purge-step-1">
+      <p class="md-body-m" id="purge-summary">Einen Moment …</p>
+      <p class="md-body-s md-on-surface-variant">
+        Erhalten bleiben Karten, Fahrzeuge, Firmen, Benutzer, Einstellungen und das Protokoll.
+        Das Protokoll hält auch fest, dass und von wem gelöscht wurde.
+      </p>
+      <div class="md-dialog__actions">
+        <button type="button" class="md-btn md-btn--text" data-purge-cancel>Abbrechen</button>
+        <button type="button" class="md-btn md-btn--danger hidden" id="purge-next">Weiter</button>
+      </div>
+    </div>
+
+    <div id="purge-step-2" class="hidden">
+      <p class="md-body-m" style="margin-top:0">
+        Zur Sicherheit: Gib dein Passwort ein und tippe den Monat ab.
+      </p>
+      <div id="purge-error" class="md-banner md-banner--error hidden" style="margin-bottom:20px" role="alert"></div>
+      <div class="md-stack" style="gap:20px">
+        <label class="md-field">
+          <input class="md-field__input" type="password" id="purge-password" placeholder=" "
+                 autocomplete="current-password">
+          <span class="md-field__label">Dein Passwort</span>
+        </label>
+        <label class="md-field">
+          <input class="md-field__input" type="text" id="purge-confirm" placeholder=" "
+                 autocomplete="off" autocapitalize="off" spellcheck="false">
+          <span class="md-field__label" id="purge-confirm-label">Monat eintippen</span>
+          <span class="md-field__hint">Genau so, wie er dasteht – Groß- und Kleinschreibung zählt.</span>
+        </label>
+      </div>
+      <div class="md-dialog__actions">
+        <button type="button" class="md-btn md-btn--text" id="purge-back">Zurück</button>
+        <button type="button" class="md-btn md-btn--danger" id="purge-submit" disabled>Endgültig löschen</button>
+      </div>
+    </div>
+  </div>
+</dialog>
 
 <script src="/static/js/settings.js?v=<%= assetVersion %>" nonce="<%= cspNonce %>" defer></script>
 

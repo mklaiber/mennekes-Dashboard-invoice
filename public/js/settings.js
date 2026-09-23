@@ -131,4 +131,106 @@
         });
     });
   });
+  /* ------------------------------------------------------ Gefahrenbereich */
+
+  var purgeDialog = $('purge-dialog');
+  if (purgeDialog) {
+    var purgeState = { key: null, label: null };
+
+    function showStep(step) {
+      $('purge-step-1').classList.toggle('hidden', step !== 1);
+      $('purge-step-2').classList.toggle('hidden', step !== 2);
+      if (step === 2) $('purge-password').focus();
+    }
+
+    function purgeError(text) {
+      var box = $('purge-error');
+      box.textContent = text || '';
+      box.classList.toggle('hidden', !text);
+    }
+
+    // Der Knopf wird erst scharf, wenn der Monat woertlich dasteht und ein
+    // Passwort eingegeben ist. Der Server prueft beides noch einmal - das hier
+    // ist nur Bedienhilfe, keine Sicherung.
+    function updateSubmit() {
+      $('purge-submit').disabled = !(
+        $('purge-confirm').value.trim() === purgeState.label && $('purge-password').value.length > 0
+      );
+    }
+
+    function resetPurge() {
+      $('purge-password').value = '';
+      $('purge-confirm').value = '';
+      purgeError('');
+      updateSubmit();
+      showStep(1);
+    }
+
+    $('purge-open').addEventListener('click', function () {
+      resetPurge();
+      $('purge-next').classList.add('hidden');
+      $('purge-title').textContent = 'Daten löschen?';
+      $('purge-summary').textContent = 'Einen Moment …';
+      purgeDialog.showModal();
+
+      // Frisch holen statt aus dem Seitenaufbau: waehrend die Seite offen war,
+      // kann ein Ladevorgang hinzugekommen sein.
+      window.md.request('/api/data/current-month').then(function (info) {
+        purgeState.key = info.period.key;
+        purgeState.label = info.period.label;
+        $('purge-title').textContent = 'Daten für ' + info.period.label + ' löschen?';
+        $('purge-confirm-label').textContent = '„' + info.period.label + '“ eintippen';
+
+        var nothing = info.sessionCount === 0 && info.reportRunCount === 0 && info.fileCount === 0;
+        if (nothing) {
+          $('purge-summary').textContent = 'Für ' + info.period.label + ' gibt es nichts zu löschen.';
+          return;
+        }
+
+        $('purge-summary').textContent = 'Unwiderruflich gelöscht werden '
+          + info.sessionCount + ' Ladevorgang/Ladevorgänge mit zusammen '
+          + String(info.energyKwh).replace('.', ',') + ' kWh, '
+          + info.reportRunCount + ' Abrechnungslauf/-läufe und '
+          + info.fileCount + ' erzeugte Datei(en) aus ' + info.period.label + '.';
+        $('purge-next').classList.remove('hidden');
+      }).catch(function (error) {
+        $('purge-summary').textContent = 'Konnte nicht ermittelt werden, was gelöscht würde: ' + error.message;
+      });
+    });
+
+    $('purge-next').addEventListener('click', function () { showStep(2); });
+    $('purge-back').addEventListener('click', function () { purgeError(''); showStep(1); });
+    $('purge-password').addEventListener('input', updateSubmit);
+    $('purge-confirm').addEventListener('input', updateSubmit);
+    purgeDialog.querySelector('[data-purge-cancel]').addEventListener('click', function () { purgeDialog.close(); });
+    // Nach dem Schliessen nichts Eingetipptes zuruecklassen - auch nicht das Passwort.
+    purgeDialog.addEventListener('close', resetPurge);
+
+    $('purge-submit').addEventListener('click', function () {
+      var button = this;
+      button.disabled = true;
+      purgeError('');
+
+      window.md.request('/api/data/current-month/purge', {
+        method: 'POST',
+        body: {
+          period: purgeState.key,
+          confirmation: $('purge-confirm').value.trim(),
+          password: $('purge-password').value,
+        },
+      }).then(function (result) {
+        purgeDialog.close();
+        window.md.snackbar('Gelöscht: ' + result.sessions + ' Ladevorgänge, '
+          + result.reportRuns + ' Läufe, ' + result.files + ' Dateien aus ' + result.period.label + '.');
+        setTimeout(function () { window.location.reload(); }, 1200);
+      }).catch(function (error) {
+        // Ein falsches Passwort leeren, damit nicht versehentlich derselbe
+        // Fehlversuch noch einmal abgeschickt wird.
+        $('purge-password').value = '';
+        $('purge-password').focus();
+        purgeError(error.message);
+        updateSubmit();
+      });
+    });
+  }
 }());

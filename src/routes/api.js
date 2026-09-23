@@ -11,6 +11,8 @@ const fs = require('fs');
 const config = require('../config');
 const logger = require('../utils/logger');
 const settingsStore = require('../repositories/settingsRepository');
+const users = require('../repositories/userRepository');
+const monthPurge = require('../services/monthPurge');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireRole } = require('../middleware/auth');
 const audit = require('../repositories/auditRepository');
@@ -179,6 +181,77 @@ function createApiRouter({ liveFeed, mennekesClient }) {
       },
       mail: result.mail ? { messageId: result.mail.messageId, to: result.mail.to } : null,
     });
+  }));
+
+  // -------------------------------------------------------- Gefahrenbereich
+
+  /** GET /api/data/current-month - was ein Loeschen jetzt betreffen wuerde. */
+  router.get('/data/current-month', requireRole('admin'), asyncHandler(async (req, res) => {
+    res.json(await monthPurge.preview({
+      timezone: settingsStore.load().billing.timezone,
+      outputDir: config.server.outputDir,
+    }));
+  }));
+
+  /**
+   * POST /api/data/current-month/purge - Daten des laufenden Monats loeschen.
+   *
+   * Jede Sicherung liegt HIER und nicht nur im Dialog: eine von Hand gebaute
+   * Anfrage soll an denselben Huerden scheitern wie ein Klick.
+   *   1. nur Administratoren (Rolle)
+   *   2. der Monat, den der Dialog angezeigt hat, muss noch der laufende sein
+   *   3. der Monatsname muss woertlich eingetippt sein
+   *   4. das Passwort des angemeldeten Administrators muss stimmen - mit
+   *      derselben Sperre nach Fehlversuchen wie beim Login, damit sich das
+   *      Passwort hierueber nicht durchprobieren laesst
+   */
+  router.post('/data/current-month/purge', requireRole('admin'), asyncHandler(async (req, res) => {
+    const body = req.body || {};
+    const timezone = settingsStore.load().billing.timezone;
+    const period = monthPurge.currentPeriod(timezone);
+
+    // Wer den Dialog am 30. um 23:59 bestaetigt und um 00:00 absendet, soll
+    // nicht versehentlich den neuen, leeren Monat loeschen - oder umgekehrt.
+    if (body.period !== period.key) {
+      throw Object.assign(
+        new Error(`Der Monat hat inzwischen gewechselt (jetzt ${period.label}). Bitte die Seite neu laden.`),
+        { status: 409, code: 'conflict' }
+      );
+    }
+    if (String(body.confirmation || '').trim() !== period.label) {
+      throw badRequest(`Zur Bestätigung bitte genau „${period.label}“ eintippen.`);
+    }
+    if (!body.password) throw badRequest('Bitte dein Passwort eingeben.');
+
+    const auth = await users.authenticate(req.user.username, String(body.password));
+    if (!auth.ok) {
+      audit.log({
+        action: audit.ACTIONS.DATA_PURGE_DENIED,
+        user: req.user,
+        detail: `${period.label}: ${auth.reason === 'locked' ? 'Konto gesperrt' : 'falsches Passwort'}`,
+        ip: req.ip,
+      });
+      // Bewusst NICHT 401: fuer /api/-Pfade setzt requireAuth dann einen
+      // WWW-Authenticate-Kopf, und der Browser oeffnete einen Anmeldedialog.
+      throw Object.assign(
+        new Error(auth.reason === 'locked'
+          ? 'Zu viele Fehlversuche – dein Konto ist vorübergehend gesperrt.'
+          : 'Das Passwort ist falsch. Es wurde nichts gelöscht.'),
+        { status: auth.reason === 'locked' ? 423 : 403, code: auth.reason === 'locked' ? 'locked' : 'forbidden' }
+      );
+    }
+
+    const result = await monthPurge.purgeCurrentMonth({ timezone, outputDir: config.server.outputDir });
+
+    audit.log({
+      action: audit.ACTIONS.DATA_PURGED,
+      user: req.user,
+      detail: `${result.period.label}: ${result.sessions} Ladevorgänge, `
+        + `${result.reportRuns} Berichtsläufe, ${result.files} Dateien`,
+      ip: req.ip,
+    });
+
+    res.json({ ok: true, ...result });
   }));
 
   /** GET /api/report/files - bereits erzeugte Dateien auflisten. */
