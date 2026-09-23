@@ -21,9 +21,23 @@
     </span>
   </div>
 
+  <% if (learning.armed) { %>
+    <div class="md-banner md-banner--info" id="learn-banner" style="margin-bottom:24px">
+      <%- include('partials/icon', { name: 'key' }) %>
+      <span class="md-body-s" style="flex:1">
+        Anlernen läuft für <strong><%= learning.vehiclePlate %></strong>:
+        Karte an die Wallbox halten und Auto anstecken.
+      </span>
+      <button type="button" class="md-btn md-btn--text" data-learn-resume
+              data-learn="<%= learning.vehicleId %>" data-learn-plate="<%= learning.vehiclePlate %>">Anzeigen</button>
+    </div>
+  <% } %>
+
   <!-- ========================================================= Ladekarten -->
   <%
-    var offeneKarten = cards.filter(function (c) { return !c.assigned; });
+    // "Laden ohne Karte" ohne Fahrzeug ist der Normalfall, keine offene
+    // Entscheidung - er zaehlt hier nicht mit.
+    var offeneKarten = cards.filter(function (c) { return !c.assigned && !c.isFreeCharging; });
   %>
   <section class="md-card" style="margin-bottom:24px">
     <div class="md-row" style="margin-bottom:4px">
@@ -60,9 +74,14 @@
             <% cards.forEach(function (card) { %>
               <tr data-card="<%= card.rfid %>" data-open="<%= card.openSessionCount %>">
                 <td data-label="Karte">
-                  <div class="md-mono"><%= card.rfid %></div>
-                  <% if (!card.assigned) { %>
-                    <span class="md-chip">ohne Fahrzeug</span>
+                  <% if (card.isFreeCharging) { %>
+                    <div class="md-label-l">Laden ohne Karte</div>
+                    <div class="md-mono md-body-s md-on-surface-variant" title="Feste IdTag der Wallbox beim freien Laden"><%= card.rfid %></div>
+                  <% } else { %>
+                    <div class="md-mono"><%= card.rfid %></div>
+                    <% if (!card.assigned) { %>
+                      <span class="md-chip">ohne Fahrzeug</span>
+                    <% } %>
                   <% } %>
                 </td>
 
@@ -111,6 +130,10 @@
                       </label>
                     <% } %>
                     <button type="button" class="md-btn md-btn--tonal" data-assign-submit>Übernehmen</button>
+                    <button type="button" class="md-btn md-btn--text" data-card-kind="<%= card.isFreeCharging ? 'card' : 'free' %>"
+                            title="<%= card.isFreeCharging ? 'Das ist doch eine echte Karte' : 'Diese IdTag steht für Laden ohne Karte' %>">
+                      <%= card.isFreeCharging ? 'Ist eine Karte' : 'Ist Laden ohne Karte' %>
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -176,7 +199,13 @@
                 </span>
               </td>
               <td>
-                <button type="button" class="md-btn md-btn--text" data-edit="vehicle">Bearbeiten</button>
+                <div class="md-row" style="gap:4px;flex-wrap:wrap">
+                  <% if (vehicle.active) { %>
+                    <button type="button" class="md-btn md-btn--tonal" data-learn="<%= vehicle.id %>"
+                            data-learn-plate="<%= vehicle.plate %>">Karte anlernen</button>
+                  <% } %>
+                  <button type="button" class="md-btn md-btn--text" data-edit="vehicle">Bearbeiten</button>
+                </div>
               </td>
             </tr>
           <% }); %>
@@ -363,6 +392,49 @@
   </form>
 </dialog>
 
+
+<dialog id="learn-dialog" class="md-dialog">
+  <div class="md-dialog__panel">
+    <h2 class="md-dialog__title">Karte anlernen für <span id="learn-plate"></span></h2>
+
+    <div class="md-stack" style="gap:20px">
+      <section id="learn-wallbox">
+        <h3 class="md-title-s" style="margin:0 0 4px">An der Wallbox</h3>
+        <p class="md-body-s md-on-surface-variant" style="margin:0 0 12px">
+          Halte die Karte an die Wallbox und stecke das Auto an. Die Wallbox gibt die
+          Karten-ID erst heraus, sobald geladen wird – ein bloßes Vorhalten genügt nicht.
+          Funktioniert mit jedem Handy und jeder Karte, die die Wallbox kennt.
+        </p>
+        <div id="learn-state" class="md-banner md-banner--info">
+          <span class="md-body-s">Warte auf eine Karte …</span>
+        </div>
+      </section>
+
+      <section id="learn-nfc">
+        <h3 class="md-title-s" style="margin:0 0 4px">Am Handy</h3>
+        <p class="md-body-s md-on-surface-variant" id="learn-nfc-hint" style="margin:0 0 12px"></p>
+        <button type="button" class="md-btn md-btn--tonal hidden" id="learn-nfc-start">
+          <%- include('partials/icon', { name: 'key', size: 18 }) %> Karte ans Handy halten
+        </button>
+      </section>
+
+      <div id="learn-result" class="md-banner md-banner--success hidden" role="status"></div>
+    </div>
+
+    <div class="md-dialog__actions">
+      <button type="button" class="md-btn md-btn--text" id="learn-cancel">Abbrechen</button>
+      <button type="button" class="md-btn md-btn--filled hidden" id="learn-done">Fertig</button>
+    </div>
+  </div>
+</dialog>
+
+<%# Fuer das Anlernen am Handy: welche Karte gehoert schon zu welchem Fahrzeug,
+    und welche hat an der Wallbox schon geladen. %>
+<script type="application/json" id="fleet-cards" nonce="<%= cspNonce %>">
+  <%- JSON.stringify(cards.map(function (c) {
+    return { rfid: c.rfid, vehicleId: c.vehicleId, vehiclePlate: c.vehiclePlate, seen: c.sessionCount > 0 };
+  })) %>
+</script>
 
 <script src="/static/js/fleet.js?v=<%= assetVersion %>" nonce="<%= cspNonce %>" defer></script>
 

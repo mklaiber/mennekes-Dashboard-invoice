@@ -196,6 +196,54 @@ function updateVehicle(id, patch) {
   return findVehicle(id);
 }
 
+// --------------------------------------------------- Laden ohne Karte
+
+/**
+ * IdTags, die Wallboxen beim freien Laden ohne RFID melden. Sie sind keine
+ * Karte: gelesen wurde gar nichts, die Wallbox traegt einen festen Wert ein.
+ * Beobachtet an einer MENNEKES-Wallbox im Modbus-Betrieb (2026-09-23), dort
+ * zweimal bei Testladungen ohne Karte.
+ *
+ * Die Liste greift nur, solange fuer die IdTag keine ausdrueckliche Angabe
+ * vorliegt - wer hier falsch liegt, stellt es in der Oberflaeche um.
+ */
+const FREE_CHARGING_TAGS = new Set(['aaaabbbbccccddddeeee']);
+
+/**
+ * @param {string} rfid normalisiert
+ * @param {'card'|'free'|null} [kind] ausdrueckliche Angabe an der Karte
+ */
+function isFreeCharging(rfid, kind = null) {
+  if (kind === 'free') return true;
+  if (kind === 'card') return false;
+  return FREE_CHARGING_TAGS.has(rfid);
+}
+
+/** @returns {'card'|'free'|null} ausdrueckliche Angabe, falls vorhanden */
+function cardKind(rfid) {
+  const row = db().prepare('SELECT kind FROM rfid_mappings WHERE rfid = ?').get(rfid);
+  return row ? row.kind : null;
+}
+
+/**
+ * Legt fest, ob eine IdTag eine echte Karte ist oder "Laden ohne Karte".
+ * @param {string} rfid
+ * @param {'card'|'free'} kind
+ */
+function setCardKind(rfid, kind) {
+  const value = kind === 'free' ? 'free' : 'card';
+  const ts = now();
+  const updated = db().prepare(
+    'UPDATE rfid_mappings SET kind = ?, updated_at = ? WHERE rfid = ?'
+  ).run(value, ts, rfid);
+  if (updated.changes === 0) {
+    db().prepare(`
+      INSERT INTO rfid_mappings (rfid, rfid_raw, name, plate, billable, vehicle_id, kind, created_at, updated_at)
+      VALUES (@rfid, @rfid, '', '', 1, NULL, @kind, @ts, @ts)
+    `).run({ rfid, kind: value, ts });
+  }
+}
+
 /**
  * Alle bekannten Ladekarten mit ihrem Fahrzeug und ihrer Aktivitaet.
  *
@@ -218,6 +266,7 @@ function listCards() {
            -- Eine Karte, die es nur als Ladevorgang gibt, gilt als abrechenbar.
            COALESCE(MAX(c.billable), 1)  AS billable,
            MAX(c.known)                  AS known,
+           MAX(c.kind)                   AS kind,
            MAX(c.vehicleId)              AS vehicleId,
            MAX(c.plate)                  AS vehiclePlate,
            MAX(c.employeeName)           AS employeeName,
@@ -227,7 +276,7 @@ function listCards() {
            MAX(c.startAt)                AS lastSeenAt,
            COALESCE(SUM(c.isOpen), 0)    AS openSessionCount
       FROM (
-        SELECT m.rfid, m.rfid_raw AS rfidRaw, m.billable, 1 AS known,
+        SELECT m.rfid, m.rfid_raw AS rfidRaw, m.billable, 1 AS known, m.kind,
                v.id AS vehicleId, v.plate, v.employee_name AS employeeName,
                co.name AS companyName,
                0 AS isSession, 0 AS kwh, NULL AS startAt, 0 AS isOpen
@@ -235,7 +284,7 @@ function listCards() {
           LEFT JOIN vehicles  v  ON v.id = m.vehicle_id
           LEFT JOIN companies co ON co.id = v.company_id
         UNION ALL
-        SELECT s.rfid, s.rfid_raw, NULL, 0,
+        SELECT s.rfid, s.rfid_raw, NULL, 0, NULL,
                NULL, NULL, NULL, NULL,
                1, s.energy_kwh, s.start_at,
                CASE WHEN s.vehicle_id IS NULL THEN 1 ELSE 0 END
@@ -247,6 +296,8 @@ function listCards() {
     ...row,
     billable: Boolean(row.billable),
     known: Boolean(row.known),
+    kind: row.kind || null,
+    isFreeCharging: isFreeCharging(row.rfid, row.kind || null),
     assigned: row.vehicleId !== null,
     vehiclePlate: row.vehiclePlate || '',
     employeeName: row.employeeName || '',
@@ -400,5 +451,5 @@ module.exports = {
   listCompanies, findCompany, createCompany, updateCompany,
   listVehicles, findVehicle, createVehicle, updateVehicle,
   cardsByVehicle, listCards, listUnassignedCards, assignCardToVehicle, resolveAttribution,
-  setCardBillable,
+  setCardBillable, isFreeCharging, cardKind, setCardKind, FREE_CHARGING_TAGS,
 };

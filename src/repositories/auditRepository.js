@@ -27,6 +27,7 @@ const ACTIONS = {
   FLEET_VEHICLE_CREATED: 'fleet.vehicle.created',
   FLEET_VEHICLE_UPDATED: 'fleet.vehicle.updated',
   FLEET_CARD_ASSIGNED: 'fleet.card.assigned',
+  FLEET_CARD_LEARNING: 'fleet.card.learning',
   DATA_PURGED: 'data.purged',
   DATA_PURGE_DENIED: 'data.purge.denied',
 };

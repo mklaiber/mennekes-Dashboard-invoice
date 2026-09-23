@@ -8,6 +8,7 @@
 
 const express = require('express');
 const fleet = require('../repositories/fleetRepository');
+const cardLearning = require('../repositories/cardLearningRepository');
 const audit = require('../repositories/auditRepository');
 const settingsStore = require('../repositories/settingsRepository');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -70,6 +71,7 @@ function createFleetRouter() {
       companies: fleet.listCompanies({ includeInactive: true }),
       vehicles: fleet.listVehicles({ includeInactive: true }),
       cards: fleet.listCards(),
+      learning: cardLearning.status(),
     });
   });
 
@@ -157,6 +159,9 @@ function createFleetRouter() {
     // beruehrt nur Vorgaenge, die noch KEINER Zuordnung haben.
     const backfill = req.body?.backfill === true || req.body?.backfill === 'true';
 
+    // "nfc" = am Handy gelesen. Nur fuer das Protokoll: wer spaeter
+    // nachvollziehen will, woher eine Zuordnung stammt, soll es sehen.
+    const source = req.body?.source === 'nfc' ? 'nfc' : 'manuell';
     const result = fleet.assignCardToVehicle(rfid, vehicleId, { backfill });
     if (!result.assigned) {
       throw Object.assign(new Error('Fahrzeug nicht gefunden.'), { status: 404, code: 'not_found' });
@@ -165,10 +170,51 @@ function createFleetRouter() {
     audit.log({
       action: audit.ACTIONS.FLEET_CARD_ASSIGNED,
       user: req.user,
-      detail: `${rfid} -> ${vehicleId ?? 'gelöst'}${result.backfilled ? ` (${result.backfilled} rückwirkend)` : ''}`,
+      detail: `${rfid} -> ${vehicleId ?? 'gelöst'} [${source}]${result.backfilled ? ` (${result.backfilled} rückwirkend)` : ''}`,
       ip: req.ip,
     });
     res.json({ ...result, cards: fleet.listCards() });
+  }));
+
+  // ------------------------------------------------------------- Anlernen
+
+  router.get('/api/fleet/learn', adminOnly, (req, res) => {
+    res.json(cardLearning.status());
+  });
+
+  router.post('/api/fleet/learn', adminOnly, asyncHandler(async (req, res) => {
+    const vehicleId = parseId(req.body?.vehicleId, 'Fahrzeug');
+    const vehicle = fleet.findVehicle(vehicleId);
+    if (!vehicle) throw Object.assign(new Error('Fahrzeug nicht gefunden.'), { status: 404, code: 'not_found' });
+    if (!vehicle.active) throw badRequest('Für ein stillgelegtes Fahrzeug wird keine Karte angelernt.');
+
+    const state = cardLearning.arm(vehicleId, req.user.username);
+    audit.log({
+      action: audit.ACTIONS.FLEET_CARD_LEARNING,
+      user: req.user,
+      detail: `Anlernen gestartet für ${vehicle.plate}`,
+      ip: req.ip,
+    });
+    res.json(state);
+  }));
+
+  router.delete('/api/fleet/learn', adminOnly, (req, res) => {
+    res.json(cardLearning.cancel());
+  });
+
+  router.post('/api/fleet/cards/:rfid/kind', adminOnly, asyncHandler(async (req, res) => {
+    const rfid = settingsStore.normalizeRfid(String(req.params.rfid || ''));
+    if (!rfid) throw badRequest('Karten-ID fehlt.');
+    const kind = req.body?.kind === 'free' ? 'free' : 'card';
+
+    fleet.setCardKind(rfid, kind);
+    audit.log({
+      action: audit.ACTIONS.RFID_UPDATED,
+      user: req.user,
+      detail: `${rfid}: ${kind === 'free' ? 'Laden ohne Karte' : 'echte Karte'}`,
+      ip: req.ip,
+    });
+    res.json({ cards: fleet.listCards() });
   }));
 
   router.put('/api/fleet/cards/:rfid', adminOnly, asyncHandler(async (req, res) => {

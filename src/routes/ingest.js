@@ -19,6 +19,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { requireConnectorToken } = require('../middleware/connectorAuth');
 const chargingSessions = require('../repositories/chargingSessionRepository');
 const connectorState = require('../repositories/connectorStateRepository');
+const cardLearning = require('../repositories/cardLearningRepository');
 const MennekesClient = require('../services/mennekesClient');
 const { enrichWithIdentity } = require('../services/liveFeed');
 
@@ -73,6 +74,11 @@ function createIngestRouter({ liveFeed }) {
 
     connectorState.touch({ status: state, version: req.connector.version, ip: req.connector.ip });
 
+    // Anlernmodus: Waehrend eines Ladevorgangs traegt der Status die ID der
+    // autorisierenden Karte. Hier wird sie im Zwei-Sekunden-Takt gesehen -
+    // lange bevor der abgeschlossene Vorgang eintrifft.
+    if (state.rfid) cardLearning.tryCapture(state.rfid);
+
     // Direkt an alle offenen Dashboards weiterreichen.
     liveFeed.publish(state);
 
@@ -115,6 +121,14 @@ function createIngestRouter({ liveFeed }) {
         continue;
       }
       normalized.push({ ...session, payload: entry });
+    }
+
+    // VOR dem Speichern: ist der Anlernmodus aktiv und die Karte neu, wird
+    // sie jetzt zugeordnet - und dieser Vorgang friert die Zuordnung schon
+    // beim Einfuegen ein. Faengt auch sehr kurze Ladungen, die der
+    // Status-Takt womoeglich verpasst hat.
+    for (const session of normalized) {
+      if (session.rfid) cardLearning.tryCapture(session.rfid);
     }
 
     const result = chargingSessions.upsertMany(normalized, { source: 'connector' });

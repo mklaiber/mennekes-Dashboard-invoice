@@ -360,7 +360,49 @@ const MIGRATIONS = [
       -- Eintreffen eingefrorene Zuordnung, und die schreibt man nicht um.
     `,
   },
+  {
+    version: 5,
+    name: 'card-learning',
+    up: `
+      -- =====================================================================
+      --  Karten anlernen
+      --
+      --  Genau eine Zeile: fuer welches Fahrzeug gerade eine Karte angelernt
+      --  wird und bis wann. Die Wallbox gibt die Karten-ID nur waehrend eines
+      --  laufenden Ladevorgangs heraus (Bender-Register 720-729 sind sonst
+      --  mit Leerzeichen gefuellt) - deshalb wartet der Anlernmodus auf den
+      --  naechsten Ladevorgang statt auf ein blosses Vorhalten der Karte.
+      -- =====================================================================
+      CREATE TABLE card_learning (
+        id            INTEGER PRIMARY KEY CHECK (id = 1),
+        vehicle_id    INTEGER REFERENCES vehicles(id) ON DELETE SET NULL,
+        armed_by      TEXT NOT NULL DEFAULT '',
+        armed_at      TEXT,
+        expires_at    TEXT,
+        captured_rfid TEXT,
+        captured_at   TEXT,
+        -- Hinweis fuer die Oberflaeche, etwa wenn eine bereits zugeordnete
+        -- Karte an der Wallbox auftaucht und deshalb NICHT umgebucht wurde.
+        notice        TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO card_learning (id) VALUES (1);
+
+      -- ------------------------------------------------------------------
+      --  Karte oder "Laden ohne Karte"
+      --
+      --  Im freien Laden ohne RFID meldet die Wallbox eine feste IdTag
+      --  (bei MENNEKES z. B. "aaaabbbbccccddddeeee"). Die ist keine Karte und
+      --  darf beim Anlernen nie einem Fahrzeug zugeschlagen werden.
+      --
+      --  NULL  = automatisch erkennen (bekannte Platzhalter-IdTags)
+      --  card  = ausdruecklich eine echte Karte
+      --  free  = ausdruecklich "Laden ohne Karte"
+      -- ------------------------------------------------------------------
+      ALTER TABLE rfid_mappings ADD COLUMN kind TEXT CHECK (kind IS NULL OR kind IN ('card', 'free'));
+    `,
+  },
 ];
+
 
 
 
