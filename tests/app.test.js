@@ -246,6 +246,8 @@ describe('Authentifizierung', () => {
     it.each([
       ['/einstellungen'],
       ['/benutzer'],
+      // Nennt Empfängeradressen und Karten-IDs - wie die Einstellungsseite.
+      ['/api/settings'],
     ])('sperrt Betrachter aus %s aus', async (url) => {
       await viewer.agent.get(url).expect(403);
     });

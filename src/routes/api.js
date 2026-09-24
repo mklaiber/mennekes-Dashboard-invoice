@@ -283,8 +283,14 @@ function createApiRouter({ liveFeed, mennekesClient }) {
 
   // ------------------------------------------------------------- Einstellungen
 
-  /** GET /api/settings - aktuelle (nicht sensible) Einstellungen. */
-  router.get('/settings', (req, res) => {
+  /**
+   * GET /api/settings - aktuelle Einstellungen, nur für Administratoren.
+   * Zugangsdaten stehen hier nicht drin, wohl aber die Empfängeradressen und
+   * die Karten-IDs. Beides sieht ein Betrachter auch sonst nirgends - und mit
+   * einer Karten-ID ließe sich an einer Wallbox, die nur die UID prüft, auf
+   * fremde Rechnung laden.
+   */
+  router.get('/settings', requireRole('admin'), (req, res) => {
     res.json(settingsStore.load());
   });
 
