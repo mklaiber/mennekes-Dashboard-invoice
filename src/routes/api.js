@@ -285,6 +285,12 @@ function createApiRouter({ liveFeed, mennekesClient }) {
 
     const saved = settingsStore.save(patch, { userId: req.user.id });
 
+    // Offene Dashboards sollen eine neu zugeordnete Karte sofort mit Namen
+    // zeigen - nicht erst mit dem nächsten Status von der Wallbox.
+    if (patch.rfidMappings && liveFeed.lastState) {
+      liveFeed.publish(enrichWithIdentity(liveFeed.lastState));
+    }
+
     audit.log({
       action: Array.isArray(body.rfidMappings) ? audit.ACTIONS.RFID_UPDATED : audit.ACTIONS.SETTINGS_UPDATED,
       user: req.user,

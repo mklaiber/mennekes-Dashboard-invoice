@@ -544,8 +544,17 @@ Karten-IDs werden vor dem Vergleich normalisiert (Kleinschreibung, Entfernen von
 `:`, `-`, `_` und Leerzeichen). `04:A1:B2:C3`, `04-a1-b2-c3` und `04A1B2C3` sind
 damit dieselbe Karte.
 
+Findet sich kein exakter Treffer, gilt eine Karte auch in anderer Schreibweise
+als erkannt: in umgekehrter Byte-Reihenfolge (`C3B2A104`), mit führenden Nullen
+aufgefüllt oder als auf der Karte aufgedruckte Dezimalzahl – so meldet das
+Lesegerät der Wallbox eine UID oft anders, als sie in der Wallbox-Oberfläche oder
+auf der Karte steht. Passt eine Schreibweise auf mehr als eine Karte, wird nicht
+geraten; die Karte bleibt dann „unbekannt".
+
 Nicht zugeordnete Karten erscheinen in PDF und Dashboard als „Unbekannt (…)" mit
 Hinweis – sie werden trotzdem abgerechnet, damit keine kWh verlorengehen.
+Administratoren können eine gerade gelesene unbekannte Karte im Dashboard über
+**„Karte zuordnen"** direkt übernehmen – mit exakt der ID, die die Wallbox meldet.
 
 Über `billable: false` lässt sich eine Karte (z. B. privates Zweitfahrzeug) aus
 dem Erstattungsbetrag herausnehmen; im Einzelnachweis bleibt sie sichtbar.

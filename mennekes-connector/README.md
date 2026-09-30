@@ -197,7 +197,7 @@ Wert stehen zu lassen; beim regulären Beenden des Add-ons ebenso.
 Nach dem Start steht im Add-on-Protokoll:
 
 ```
-INFO : Connector 1.2.0 gestartet.
+INFO : Connector 1.2.1 gestartet.
 INFO : Offene Ladevorgänge in der Warteschlange: 0
 INFO : Home-Assistant-Sensoren aktiv (Gerät "Mennekes Wallbox").
 INFO : Wallbox erreichbar.

@@ -557,6 +557,19 @@ describe('Einstellungen über die API', () => {
     ]);
   });
 
+  it('zeigt eine neu zugeordnete Karte sofort mit Namen im Live-Zustand', async () => {
+    // Die Wallbox meldet die Karte in umgekehrter Byte-Reihenfolge.
+    liveFeed.lastState = { status: 'charging', rfid: 'efbeadde', rfidRaw: 'EFBEADDE', rfidName: null };
+
+    await admin.agent
+      .put('/api/settings')
+      .set('X-CSRF-Token', admin.csrfToken)
+      .send({ rfidMappings: [{ rfid: 'DEADBEEF', name: 'Neuer Fahrer' }] })
+      .expect(200);
+
+    expect(liveFeed.lastState.rfidName).toBe('Neuer Fahrer');
+  });
+
   it('verwirft RFID-Einträge ohne ID', async () => {
     const response = await admin.agent
       .put('/api/settings')

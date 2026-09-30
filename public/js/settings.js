@@ -212,4 +212,27 @@
   });
 
   renderMappings();
+
+  /* ------------------------------------ Karte aus dem Dashboard zuordnen */
+
+  // Das Dashboard verlinkt eine unbekannte Karte mit ?rfid=<gelesene ID>. Die
+  // ID wird exakt so übernommen, wie die Wallbox sie meldet - Abtippen von der
+  // Karte oder aus der Wallbox-Oberfläche liefert oft eine andere Schreibweise.
+  (function prefillFromDashboard() {
+    var rfid = new window.URLSearchParams(window.location.search).get('rfid');
+    if (!rfid) return;
+
+    var key = function (value) { return String(value || '').replace(/[\s:_-]/g, '').toLowerCase(); };
+    var index = mappings.findIndex(function (entry) { return key(entry.rfidRaw || entry.rfid) === key(rfid); });
+    if (index === -1) {
+      mappings.push({ rfid: rfid, rfidRaw: rfid, name: '', plate: '', billable: true });
+      renderMappings();
+      index = mappings.length - 1;
+    }
+
+    var nameInput = $('rfid-rows').querySelector('input[data-field="name"][data-index="' + index + '"]');
+    $('rfid').scrollIntoView({ block: 'start' });
+    if (nameInput) nameInput.focus();
+    window.md.snackbar('Karte ' + rfid + ' übernommen – Namen eintragen und speichern.');
+  }());
 }());

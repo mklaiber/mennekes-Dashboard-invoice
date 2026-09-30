@@ -16,18 +16,10 @@ const fs = require('fs');
 const { db, now, transaction } = require('../db');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { normalizeRfid, RfidLookup } = require('../utils/rfid');
 
 /** Zweige, die als JSON in `settings` liegen. */
 const BRANCHES = ['wallbox', 'billing', 'mail', 'scheduler'];
-
-/**
- * Normalisiert RFID-IDs, damit "AA:BB:CC", "aabbcc" und "AA-BB-CC" identisch sind.
- * @param {string} rfid
- * @returns {string}
- */
-function normalizeRfid(rfid) {
-  return String(rfid || '').replace(/[\s:_-]/g, '').toLowerCase();
-}
 
 /** Werksseitige Defaults, mit ENV-Startwerten vorbelegt. */
 function defaultSettings() {
@@ -190,18 +182,13 @@ function replaceRfidMappings(mappings) {
 }
 
 /**
- * Lookup-Map fuer die Abrechnung.
+ * Lookup fuer die Abrechnung - findet eine Karte auch in anderer Schreibweise
+ * (Byte-Reihenfolge, aufgedruckte Dezimalzahl), siehe utils/rfid.js.
  * @param {Array<object>} [mappings]
- * @returns {Map<string, object>}
+ * @returns {RfidLookup}
  */
 function rfidLookup(mappings) {
-  const source = mappings || listRfidMappings();
-  const map = new Map();
-  for (const entry of source) {
-    if (!entry || !entry.rfid) continue;
-    map.set(normalizeRfid(entry.rfid), entry);
-  }
-  return map;
+  return new RfidLookup(mappings || listRfidMappings());
 }
 
 // ------------------------------------------------------------------ Migration

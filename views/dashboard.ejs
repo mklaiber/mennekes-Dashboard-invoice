@@ -110,6 +110,11 @@
       <div class="md-metric__label">Aktive Ladekarte</div>
       <p id="rfid-name" class="md-headline-s" style="margin:12px 0 2px">–</p>
       <p id="rfid-id" class="md-mono md-on-surface-variant" style="margin:0">keine Karte erkannt</p>
+      <% if (currentUser && currentUser.role === 'admin') { %>
+        <a id="rfid-assign" class="md-btn md-btn--tonal md-btn--small hidden" href="/einstellungen" style="margin-top:12px">
+          Karte zuordnen
+        </a>
+      <% } %>
 
       <hr class="md-divider" style="margin:20px 0">
 

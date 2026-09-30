@@ -37,7 +37,8 @@ function calculateCost(kwh, pricePerKwh) {
  * @returns {{name:string, plate:string, billable:boolean, known:boolean}}
  */
 function resolveRfid(rfid, lookup) {
-  const entry = lookup.get(normalizeRfid(rfid));
+  // RfidLookup kennt auch andere Schreibweisen derselben Karte; eine schlichte Map nur den exakten Schlüssel.
+  const entry = typeof lookup.find === 'function' ? lookup.find(rfid) : lookup.get(normalizeRfid(rfid));
   if (!entry) {
     return { name: `Unbekannt (${rfid})`, plate: '', billable: true, known: false };
   }

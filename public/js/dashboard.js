@@ -69,6 +69,15 @@
     $('rfid-name').textContent = state.rfidName || (state.rfidRaw ? 'Unbekannte Karte' : '–');
     $('rfid-id').textContent = state.rfidRaw || 'keine Karte erkannt';
 
+    // Nur für Administratoren gerendert; übernimmt die ID exakt wie gelesen.
+    var assign = $('rfid-assign');
+    if (assign) {
+      var unknown = Boolean(state.rfidRaw && !state.rfidName);
+      assign.classList.toggle('hidden', !unknown);
+      // Kein #-Anker: der Sprung dorthin würde den Fokus aus dem Namensfeld nehmen.
+      if (unknown) assign.href = '/einstellungen?rfid=' + encodeURIComponent(state.rfidRaw);
+    }
+
     $('session-energy').textContent = state.energySessionKwh === null || state.energySessionKwh === undefined
       ? '–' : numberFmt(state.energySessionKwh, 2) + ' kWh';
     $('session-duration').textContent = state.sessionStart ? elapsed(state.sessionStart) : '–';

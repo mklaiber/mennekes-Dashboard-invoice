@@ -8,7 +8,7 @@
 # =============================================================================
 
 name: Mennekes Wallbox Connector
-version: "1.2.0"
+version: "1.2.1"
 slug: mennekes_connector
 description: >-
   Liest die Ladedaten einer MENNEKES Wallbox im Heimnetz aus und übermittelt sie
