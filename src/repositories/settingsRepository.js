@@ -16,18 +16,10 @@ const fs = require('fs');
 const { db, now, transaction } = require('../db');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { normalizeRfid, RfidLookup } = require('../utils/rfid');
 
 /** Zweige, die als JSON in `settings` liegen. */
 const BRANCHES = ['wallbox', 'billing', 'mail', 'scheduler'];
-
-/**
- * Normalisiert RFID-IDs, damit "AA:BB:CC", "aabbcc" und "AA-BB-CC" identisch sind.
- * @param {string} rfid
- * @returns {string}
- */
-function normalizeRfid(rfid) {
-  return String(rfid || '').replace(/[\s:_-]/g, '').toLowerCase();
-}
 
 /** Werksseitige Defaults, mit ENV-Startwerten vorbelegt. */
 function defaultSettings() {
@@ -208,18 +200,28 @@ function replaceRfidMappings(mappings) {
 }
 
 /**
- * Lookup-Map fuer die Abrechnung.
- * @param {Array<object>} [mappings]
- * @returns {Map<string, object>}
+ * Karten samt AKTUELLER Fahrzeugzuordnung. Im Fuhrpark zugeordnete Karten
+ * tragen keinen eigenen Namen - Person und Kennzeichen haengen am Fahrzeug.
+ * @returns {Array<object>}
+ */
+function listCardsWithVehicle() {
+  return db().prepare(`
+    SELECT m.rfid, m.rfid_raw AS rfidRaw, m.name, m.plate, m.billable, m.vehicle_id AS vehicleId,
+           COALESCE(v.plate, '') AS vehiclePlate, COALESCE(v.label, '') AS vehicleLabel,
+           COALESCE(v.employee_name, '') AS employeeName
+      FROM rfid_mappings m
+      LEFT JOIN vehicles v ON v.id = m.vehicle_id
+  `).all().map((row) => ({ ...row, billable: Boolean(row.billable) }));
+}
+
+/**
+ * Lookup fuer Abrechnung und Live-Anzeige - findet eine Karte auch in anderer
+ * Schreibweise (Byte-Reihenfolge, aufgedruckte Dezimalzahl), siehe utils/rfid.js.
+ * @param {Array<object>} [mappings] ohne Angabe: alle Karten mit aktuellem Fahrzeug
+ * @returns {RfidLookup}
  */
 function rfidLookup(mappings) {
-  const source = mappings || listRfidMappings();
-  const map = new Map();
-  for (const entry of source) {
-    if (!entry || !entry.rfid) continue;
-    map.set(normalizeRfid(entry.rfid), entry);
-  }
-  return map;
+  return new RfidLookup(mappings || listCardsWithVehicle());
 }
 
 // ------------------------------------------------------------------ Migration

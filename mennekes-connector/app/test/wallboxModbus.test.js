@@ -96,6 +96,20 @@ describe('WallboxModbus.getStatus', () => {
     assert.strictEqual(wallbox.host, '192.168.178.47');
   });
 
+  test('liest die Karten-UID auch dann, wenn das Sitzungsenergie-Register fehlt', async () => {
+    const registers = baseRegisters({
+      [REG.CHARGE_POINT_STATE]: [3],
+      [REG.USER_ID]: stringToRegisters('04A1B2C3', 10),
+    });
+    delete registers[REG.CHARGED_ENERGY];
+    const wallbox = new WallboxModbus({ baseUrl: 'http://x' }, fakeModbus(registers));
+
+    const status = await wallbox.getStatus();
+
+    assert.strictEqual(status.ChgNrg, null);
+    assert.strictEqual(status.Uid, '04A1B2C3');
+  });
+
   test('behandelt 0xFFFFFFFF als "nicht verfügbar"', async () => {
     const wallbox = new WallboxModbus(
       { baseUrl: 'http://x' },

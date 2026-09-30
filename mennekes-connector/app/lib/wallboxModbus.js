@@ -95,7 +95,9 @@ class WallboxModbus {
     try {
       return await this.modbus.readHoldingRegisters(address, length);
     } catch (error) {
-      if (this.modbus.isOpen) {
+      // Nur eine gestörte Verbindung neu aufbauen - eine Modbus-Fehlerantwort
+      // (modbusCode, z. B. "Register gibt es nicht") kam über eine intakte.
+      if (error.modbusCode === undefined && this.modbus.isOpen) {
         try { this.modbus.close(() => {}); } catch { /* bereits zu */ }
       }
       throw new Error(`Modbus-Zugriff auf Register ${address} fehlgeschlagen: ${error.message}`);
@@ -104,6 +106,16 @@ class WallboxModbus {
 
   async #readU32(address) {
     return asU32(await this.#read(address, 2));
+  }
+
+  /** Optionales Register: ist es nicht lesbar, gilt der Wert als "nicht verfügbar" (null). */
+  async #optional(label, read) {
+    try {
+      return await read();
+    } catch (error) {
+      logger.debug(`${label} nicht lesbar: ${error.message}`);
+      return null;
+    }
   }
 
   async #ensureRegisterSet() {
@@ -143,16 +155,11 @@ class WallboxModbus {
       ? await this.#legacyTotalEnergyWh()
       : await this.#readU32(REG.TOTAL_ENERGY);
 
-    let chargedEnergyWh = null;
-    let chargingDurationS = null;
-    let uid = null;
-    try {
-      chargedEnergyWh = await this.#readU32(REG.CHARGED_ENERGY);
-      chargingDurationS = await this.#readU32(REG.CHARGING_DURATION);
-      uid = asString(await this.#read(REG.USER_ID, 10)) || null;
-    } catch (error) {
-      logger.debug(`Sitzungsregister nicht lesbar: ${error.message}`);
-    }
+    // Jedes Sitzungsregister einzeln: fehlt die Sitzungsenergie auf dieser
+    // Firmware, darf das nicht auch die Karten-UID kosten.
+    const chargedEnergyWh = await this.#optional('Sitzungsenergie', () => this.#readU32(REG.CHARGED_ENERGY));
+    const chargingDurationS = await this.#optional('Sitzungsdauer', () => this.#readU32(REG.CHARGING_DURATION));
+    const uid = await this.#optional('Karten-UID', async () => asString(await this.#read(REG.USER_ID, 10)) || null);
 
     this.#trackSession(status, { chargedEnergyWh, chargingDurationS, uid });
 

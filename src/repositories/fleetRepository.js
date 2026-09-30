@@ -15,6 +15,19 @@
 
 const { db, now, transaction } = require('../db');
 const logger = require('../utils/logger');
+const { RfidLookup } = require('../utils/rfid');
+
+/**
+ * Gespeicherter Schlüssel einer Karte, auch wenn die Wallbox sie in anderer
+ * Schreibweise meldet - etwa wenn sie am Handy (NFC) angelegt wurde, dessen
+ * Leser die Bytes andersherum liefert.
+ * @param {string} rfid
+ * @returns {string} Schlüssel in rfid_mappings, sonst die Eingabe
+ */
+function storedCardKey(rfid) {
+  const cards = new RfidLookup(db().prepare('SELECT rfid FROM rfid_mappings').all());
+  return cards.find(rfid)?.rfid ?? rfid;
+}
 
 const text = (value, max) => String(value ?? '').trim().slice(0, max);
 
@@ -342,6 +355,7 @@ function setCardBillable(rfid, billable) {
  * @returns {Array<{rfid:string, rfidRaw:string, sessionCount:number, energyKwh:number, lastSeenAt:string, known:boolean}>}
  */
 function listUnassignedCards() {
+  const cards = new RfidLookup(db().prepare('SELECT rfid FROM rfid_mappings').all());
   return db().prepare(`
     SELECT s.rfid,
            MAX(s.rfid_raw)                         AS rfidRaw,
@@ -354,7 +368,7 @@ function listUnassignedCards() {
      WHERE s.vehicle_id IS NULL
      GROUP BY s.rfid
      ORDER BY lastSeenAt DESC
-  `).all().map((row) => ({ ...row, known: Boolean(row.known) }));
+  `).all().map((row) => ({ ...row, known: Boolean(row.known) || Boolean(cards.find(row.rfid)) }));
 }
 
 /**
@@ -442,7 +456,7 @@ function resolveAttribution(rfid) {
       JOIN vehicles v   ON v.id = m.vehicle_id
       LEFT JOIN companies c ON c.id = v.company_id
      WHERE m.rfid = ?
-  `).get(rfid);
+  `).get(storedCardKey(rfid));
 
   return row || empty;
 }

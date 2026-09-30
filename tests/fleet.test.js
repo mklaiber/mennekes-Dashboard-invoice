@@ -305,3 +305,42 @@ describe('Abrechnung nach Fahrzeug, Firma und Mitarbeiter', () => {
     expect(group.cost).toBe(Number((0.999 * 0.37).toFixed(2)));
   });
 });
+
+describe('Anzeige einer im Fuhrpark zugeordneten Karte', () => {
+  const { enrichWithIdentity } = require('../src/services/liveFeed');
+
+  it('zeigt Mitarbeiter und Kennzeichen des Fahrzeugs statt "Unbekannt"', () => {
+    // So entsteht die Karte beim Zuordnen im Fuhrpark: ohne eigenen Namen.
+    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100', employeeName: 'Moritz' });
+    fleet.assignCardToVehicle('a1b2c3d4', vehicle.id);
+
+    const state = enrichWithIdentity({ rfid: 'a1b2c3d4', rfidRaw: 'A1B2C3D4' });
+
+    expect(state.rfidName).toBe('Moritz');
+    expect(state.rfidPlate).toBe('TUT-MK-100');
+  });
+
+  it('nimmt das Kennzeichen, wenn am Fahrzeug kein Mitarbeiter steht', () => {
+    const vehicle = fleet.createVehicle({ plate: 'TUT-PR-1' });
+    fleet.assignCardToVehicle('a1b2c3d4', vehicle.id);
+
+    expect(enrichWithIdentity({ rfid: 'a1b2c3d4' }).rfidName).toBe('TUT-PR-1');
+  });
+
+  it('erkennt die Karte, wenn die Wallbox die Bytes andersherum meldet als das Handy', () => {
+    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100', employeeName: 'Moritz' });
+    fleet.assignCardToVehicle('a1b2c3d4', vehicle.id); // am Handy gelesen
+
+    expect(enrichWithIdentity({ rfid: 'd4c3b2a1' }).rfidName).toBe('Moritz');
+    expect(fleet.resolveAttribution('d4c3b2a1')).toMatchObject({ vehiclePlate: 'TUT-MK-100', employeeName: 'Moritz' });
+  });
+
+  it('führt die Karte bei ihren Ladevorgängen nicht mehr als unbekannt', () => {
+    const vehicle = fleet.createVehicle({ plate: 'TUT-MK-100', employeeName: 'Moritz' });
+    fleet.assignCardToVehicle('a1b2c3d4', vehicle.id);
+    insertSession('s-rev', 'd4c3b2a1', 5, '2026-09-10T10:00:00.000Z');
+
+    expect(fleet.listUnassignedCards().find((card) => card.rfid === 'd4c3b2a1').known).toBe(true);
+    expect(settingsStore.rfidLookup().find('d4c3b2a1').vehiclePlate).toBe('TUT-MK-100');
+  });
+});

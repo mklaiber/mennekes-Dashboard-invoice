@@ -1,5 +1,14 @@
 # Änderungsverlauf
 
+## 1.3.1
+
+- Fehler behoben: Die Karten-UID (Modbus-Register 720) wurde nur gelesen, wenn
+  auch die Sitzungsregister (716/718) lesbar waren. Fehlt eines davon auf der
+  jeweiligen Firmware, ging damit auch die UID verloren. Jedes Register wird
+  jetzt einzeln gelesen.
+- Eine Modbus-Fehlerantwort („Register gibt es nicht") baut die Verbindung
+  nicht mehr jedes Mal ab und wieder auf – nur echte Übertragungsfehler tun das.
+
 ## 1.2.0
 
 - **Modbus-TCP-Unterstützung** für MENNEKES AMTRON Professional/Professional+/

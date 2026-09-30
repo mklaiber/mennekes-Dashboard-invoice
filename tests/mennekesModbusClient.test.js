@@ -147,6 +147,36 @@ describe('getLiveStatus', () => {
     expect(state.meterKwh).toBe(3000);
   });
 
+  it('liest die Karten-UID auch dann, wenn das Sitzungsenergie-Register fehlt', async () => {
+    const unsupported = Object.assign(new Error('Modbus exception 2: Illegal data address'), { modbusCode: 2 });
+    const client = new MennekesModbusClient({
+      host: 'x',
+      modbusClient: fakeModbus(baseRegisters({
+        [REG.CHARGE_POINT_STATE]: [3],
+        [REG.CHARGED_ENERGY]: unsupported,
+        [REG.USER_ID]: stringToRegisters('04A1B2C3', 10),
+      })),
+    });
+
+    const state = await client.getLiveStatus();
+
+    expect(state.energySessionKwh).toBeNull();
+    expect(state.rfidRaw).toBe('04A1B2C3');
+  });
+
+  it('hält die Verbindung bei einer Modbus-Fehlerantwort offen, baut sie bei Übertragungsfehlern neu auf', async () => {
+    const unsupported = Object.assign(new Error('Modbus exception 2: Illegal data address'), { modbusCode: 2 });
+    const modbus = fakeModbus(baseRegisters({ [REG.CHARGED_ENERGY]: unsupported }));
+    const client = new MennekesModbusClient({ host: 'x', modbusClient: modbus });
+
+    await client.getLiveStatus();
+    expect(modbus.isOpen).toBe(true);
+
+    modbus.readHoldingRegisters = async () => { throw new Error('ETIMEDOUT'); };
+    await expect(client.ping()).resolves.toMatchObject({ reachable: false });
+    expect(modbus.isOpen).toBe(false);
+  });
+
   it('bleibt funktionsfähig, wenn die Sitzungsregister fehlen (z. B. 4You/4Business)', async () => {
     const registers = baseRegisters();
     delete registers[REG.CHARGED_ENERGY];

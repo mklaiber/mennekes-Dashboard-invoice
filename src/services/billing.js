@@ -32,18 +32,28 @@ function calculateCost(kwh, pricePerKwh) {
 
 /**
  * Löst eine RFID-ID gegen die konfigurierten Mappings auf.
+ *
+ * Im Fuhrpark zugeordnete Karten tragen keinen eigenen Namen - Person und
+ * Kennzeichen hängen am Fahrzeug. Ohne Rückgriff darauf stünde eine
+ * zugeordnete Karte als "Unbekannt (…)" da.
+ *
  * @param {string} rfid normalisierte RFID
- * @param {Map<string, object>} lookup
+ * @param {Map<string, object>} lookup RfidLookup (erkennt auch andere Schreibweisen) oder schlichte Map
+ * @param {{employeeName?:string, vehiclePlate?:string}} [attribution] Fahrzeugzuordnung, die gelten
+ *   soll - die Abrechnung übergibt die beim Ladevorgang eingefrorene. Ohne Angabe gilt die
+ *   aktuelle Zuordnung aus dem Lookup (Live-Anzeige).
  * @returns {{name:string, plate:string, billable:boolean, known:boolean}}
  */
-function resolveRfid(rfid, lookup) {
-  const entry = lookup.get(normalizeRfid(rfid));
+function resolveRfid(rfid, lookup, attribution) {
+  const entry = typeof lookup.find === 'function' ? lookup.find(rfid) : lookup.get(normalizeRfid(rfid));
   if (!entry) {
     return { name: `Unbekannt (${rfid})`, plate: '', billable: true, known: false };
   }
+  const vehicle = attribution || entry;
+  const plate = entry.plate || vehicle.vehiclePlate || '';
   return {
-    name: entry.name || `Unbekannt (${rfid})`,
-    plate: entry.plate || '',
+    name: entry.name || vehicle.employeeName || vehicle.vehicleLabel || plate || `Unbekannt (${rfid})`,
+    plate,
     // Nur ein explizites false schließt von der Abrechnung aus.
     billable: entry.billable !== false,
     known: true,
@@ -142,7 +152,12 @@ function buildMonthlyReport({
     .sort((a, b) => a.start - b.start);
 
   const rows = inPeriod.map((session) => {
-    const identity = resolveRfid(session.rfid, rfidLookup);
+    // Eingefrorene Zuordnung des Ladevorgangs - eine spätere Umbuchung der
+    // Karte ändert nicht, wem ein vergangener Vorgang gehört.
+    const identity = resolveRfid(session.rfid, rfidLookup, {
+      employeeName: session.employeeName || '',
+      vehiclePlate: session.vehiclePlate || '',
+    });
     const energyKwh = round(session.energyKwh, 3);
     return {
       id: session.id,
