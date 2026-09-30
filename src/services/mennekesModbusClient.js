@@ -134,8 +134,10 @@ class MennekesModbusClient {
       return await this.modbus.readHoldingRegisters(address, length);
     } catch (error) {
       // Eine tote Verbindung meldet sich oft erst beim nächsten Zugriff -
-      // danach neu verbinden statt denselben Fehler dauerhaft zu werfen.
-      if (this.modbus.isOpen) {
+      // danach neu verbinden statt denselben Fehler dauerhaft zu werfen. Eine
+      // Modbus-Fehlerantwort (modbusCode, z. B. "Register gibt es nicht") kam
+      // dagegen über eine intakte Verbindung - die bleibt stehen.
+      if (error.modbusCode === undefined && this.modbus.isOpen) {
         try { this.modbus.close(() => {}); } catch { /* bereits zu */ }
       }
       throw new MennekesModbusError(
@@ -148,6 +150,16 @@ class MennekesModbusClient {
   /** @param {number} address @returns {Promise<number|null>} siehe {@link asU32} */
   async #readU32(address) {
     return asU32(await this.#read(address, 2));
+  }
+
+  /** Optionales Register: ist es nicht lesbar, gilt der Wert als "nicht verfügbar" (null). */
+  async #optional(label, read) {
+    try {
+      return await read();
+    } catch (error) {
+      logger.debug(`${label} nicht lesbar: ${error.message}`);
+      return null;
+    }
   }
 
   /**
@@ -215,19 +227,11 @@ class MennekesModbusClient {
       : await this.#readU32(REG.TOTAL_ENERGY);
 
     // Sitzungsregister (716/718/720) fehlen auf manchen Firmwaregenerationen
-    // (4You/4Business, siehe evcc charger/bender.go) - Live-Status bleibt
-    // trotzdem verfügbar, nur ohne Sitzungsdetails.
-    let chargedEnergyWh = null;
-    let chargingDurationS = null;
-    let rfidRaw = null;
-    try {
-      chargedEnergyWh = await this.#readU32(REG.CHARGED_ENERGY);
-      chargingDurationS = await this.#readU32(REG.CHARGING_DURATION);
-      const userId = asString(await this.#read(REG.USER_ID, 10));
-      rfidRaw = userId || null;
-    } catch (error) {
-      logger.debug(`Sitzungsregister nicht lesbar: ${error.message}`);
-    }
+    // (4You/4Business, siehe evcc charger/bender.go). Jedes einzeln lesen:
+    // fehlt die Sitzungsenergie, darf das nicht auch die Karten-UID kosten.
+    const chargedEnergyWh = await this.#optional('Sitzungsenergie', () => this.#readU32(REG.CHARGED_ENERGY));
+    const chargingDurationS = await this.#optional('Sitzungsdauer', () => this.#readU32(REG.CHARGING_DURATION));
+    const rfidRaw = await this.#optional('Karten-UID', async () => asString(await this.#read(REG.USER_ID, 10)) || null);
 
     let currentA = null;
     let voltageV = null;

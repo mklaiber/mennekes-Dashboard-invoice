@@ -544,6 +544,16 @@ Karten-IDs werden vor dem Vergleich normalisiert (Kleinschreibung, Entfernen von
 `:`, `-`, `_` und Leerzeichen). `04:A1:B2:C3`, `04-a1-b2-c3` und `04A1B2C3` sind
 damit dieselbe Karte.
 
+Findet sich kein exakter Treffer, gilt eine Karte auch in anderer Schreibweise
+als erkannt: in umgekehrter Byte-Reihenfolge (`C3B2A104`), mit führenden Nullen
+aufgefüllt oder als auf der Karte aufgedruckte Dezimalzahl. So meldet der Leser
+der Wallbox eine UID oft anders als ein Handy (NFC) oder die Beschriftung der
+Karte. Passt eine Schreibweise auf mehr als eine Karte, wird nicht geraten.
+
+Eine im Fuhrpark zugeordnete Karte trägt keinen eigenen Namen; angezeigt werden
+dann Mitarbeiter bzw. Kennzeichen des Fahrzeugs – live die aktuelle Zuordnung,
+in der Abrechnung die beim Ladevorgang eingefrorene.
+
 Nicht zugeordnete Karten erscheinen in PDF und Dashboard als „Unbekannt (…)" mit
 Hinweis – sie werden trotzdem abgerechnet, damit keine kWh verlorengehen.
 

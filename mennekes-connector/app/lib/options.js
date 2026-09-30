@@ -94,7 +94,7 @@ function load() {
     sessionsIntervalMs: int('SESSIONS_INTERVAL_SECONDS', 900) * 1000,
     historyDays: int('HISTORY_DAYS', 45),
     stateDir: str('STATE_DIR', '/data'),
-    version: str('CONNECTOR_VERSION', '1.2.0'),
+    version: str('CONNECTOR_VERSION', '1.3.1'),
     mqtt: {
       // Fehlt der Host - egal ob manuell gesetzt oder über den
       // Home-Assistant-Dienst gefunden (siehe run.sh) - bleiben die Sensoren
